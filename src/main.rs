@@ -14,6 +14,5 @@ fn main() -> Result<()> {
             println!("{}", decoded);
         }
     }
-
     Ok(())
 }
