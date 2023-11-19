@@ -1,30 +1,19 @@
-use clap::{arg, command, Parser, Subcommand};
-type Chars = Vec<u8>;
+use anyhow::Result;
+use clap::Parser;
+use cli::{Cli, Command};
 
-#[derive(Parser)]
-#[command(author = "Dmytro Onypko", name = "Torrent Sample Client")]
-struct Cli {
-    #[command(subcommand, name = "action")]
-    command: Command,
-}
+mod cli;
+mod de;
+mod error;
 
-#[derive(Subcommand)]
-enum Command {
-    #[command(long_about = "Decode Bencode Value")]
-    Decode {
-        #[arg(
-            name = "bencoded value",
-            help = "value to decode, could be string of non utf8 chars"
-        )]
-        bencoded_value: Chars,
-    },
-}
-
-fn main() {
+fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Decode { bencoded_value } => {
-            println!("{}", String::from_utf8(bencoded_value).unwrap());
+            let decoded = de::parse_bencode_byte_string(bencoded_value)?;
+            println!("{}", decoded);
         }
     }
+
+    Ok(())
 }
