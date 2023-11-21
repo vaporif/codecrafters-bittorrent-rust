@@ -1,13 +1,21 @@
 use anyhow::{anyhow, bail, Context, Result};
-use std::{collections::HashMap, todo};
+use serde::forward_to_deserialize_any;
+use std::todo;
 
-#[allow(dead_code)]
-#[derive(Debug, PartialEq)]
-pub enum Value {
-    String(Vec<u8>),
-    Integer(i64),
-    List(Vec<Value>),
-    Dict(HashMap<Vec<u8>, Value>),
+pub fn from_str<'de, T, V>(data: T) -> Result<V>
+where
+    T: AsRef<str> + 'de,
+    V: serde::de::Deserialize<'de>,
+{
+    from_bytes(data.as_ref().as_bytes())
+}
+
+pub fn from_bytes<'de, 'a, V>(data: &'a [u8]) -> Result<V>
+where
+    V: serde::de::Deserialize<'de>,
+{
+    let mut iter = data.iter().copied();
+    V::deserialize(Deserializer::new(&mut iter)).context("Failed")
 }
 
 pub enum ElemenentParse {
@@ -18,58 +26,104 @@ pub enum ElemenentParse {
     End,
 }
 
-impl std::fmt::Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::String(chars) => write!(f, "\"{}\"", String::from_utf8_lossy(chars)),
-            Value::Integer(number) => write!(f, "{}", number),
-            Value::List(values) => write!(
-                f,
-                "{}",
-                values
-                    .iter()
-                    .map(|e| format!("{}", e))
-                    .reduce(|acc, e| format!("{acc}, {e}"))
-                    .unwrap_or_default()
-            ),
-            Value::Dict(_) => todo!(),
-        }
-    }
+struct Deserializer<'a, T: Iterator> {
+    data: &'a mut T,
 }
 
-pub fn parse_bencode_byte_string<I>(chars: I) -> Result<Value>
-where
-    I: AsRef<[u8]>,
-{
-    let mut chars = chars.as_ref().iter();
-    let mut deserializer = Deserializer::new(&mut chars);
-    deserializer.get_bencode_value()
-}
+impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for Deserializer<'a, T> {
+    type Error = crate::error::Error;
 
-struct Deserializer<'de, T: Iterator> {
-    data: &'de mut T,
-}
-
-impl<'de, T: Iterator<Item = &'de u8>> Deserializer<'de, T> {
-    fn new(data: &'de mut T) -> Self {
-        Self { data }
-    }
-
-    fn get_bencode_value(&mut self) -> Result<Value> {
+    fn deserialize_any<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
         match self.get_next_element()? {
-            ElemenentParse::Integer(int) => Ok(Value::Integer(int)),
-            ElemenentParse::List => todo!(),
+            ElemenentParse::Integer(v) => visitor.visit_i64(v),
+            ElemenentParse::String(v) => visitor.visit_bytes(&v),
+            ElemenentParse::List => self.deserialize_seq(visitor),
             ElemenentParse::Map => todo!(),
             ElemenentParse::End => todo!(),
-            ElemenentParse::String(bytes) => Ok(Value::String(bytes)),
         }
+    }
+
+    forward_to_deserialize_any! { enum i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bytes struct map char unit unit_struct option str string }
+
+    fn deserialize_bool<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn deserialize_byte_buf<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn deserialize_newtype_struct<V>(
+        self,
+        _: &'static str,
+        _: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn deserialize_seq<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn deserialize_tuple<V>(self, _: usize, _: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn deserialize_tuple_struct<V>(
+        self,
+        _: &'static str,
+        _: usize,
+        _: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn deserialize_identifier<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn deserialize_ignored_any<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+}
+
+impl<'a, T: Iterator<Item = u8>> Deserializer<'a, T> {
+    fn new(data: &'a mut T) -> Self {
+        Self { data }
     }
 
     fn get_int(&mut self) -> Result<i64> {
         let mut int_vec = Vec::new();
 
         for byte in &mut self.data {
-            if *byte == b'e' {
+            if byte == b'e' {
                 let integer = String::from_utf8(int_vec)
                     .context("utf8 expected as char for int")?
                     .parse::<i64>()
@@ -77,15 +131,15 @@ impl<'de, T: Iterator<Item = &'de u8>> Deserializer<'de, T> {
                 return Ok(integer);
             }
 
-            int_vec.push(*byte);
+            int_vec.push(byte);
         }
 
         bail!("'e' character was expected");
     }
 
-    fn get_string_bytes(&mut self, first_number: &u8) -> Result<Vec<u8>> {
+    fn get_string_bytes(&mut self, first_number: u8) -> Result<Vec<u8>> {
         let string_len = self.get_length_of_bytes(first_number)?;
-        let byte_string = self.data.take(string_len).copied().collect::<Vec<u8>>();
+        let byte_string = self.data.take(string_len).collect::<Vec<u8>>();
         let byte_string_len = byte_string.len();
         if byte_string_len != string_len {
             bail!("Unexpected len of string, Expected: {string_len}, got {byte_string_len}")
@@ -93,11 +147,11 @@ impl<'de, T: Iterator<Item = &'de u8>> Deserializer<'de, T> {
         Ok(byte_string)
     }
 
-    fn get_length_of_bytes(&mut self, first_number: &u8) -> Result<usize> {
-        let mut number_len = vec![*first_number];
+    fn get_length_of_bytes(&mut self, first_number: u8) -> Result<usize> {
+        let mut number_len = vec![first_number];
 
         for byte in &mut self.data {
-            if *byte == b':' {
+            if byte == b':' {
                 let integer = String::from_utf8(number_len)
                     .context("utf8 expected as char for int")?
                     .parse::<usize>()
@@ -107,7 +161,7 @@ impl<'de, T: Iterator<Item = &'de u8>> Deserializer<'de, T> {
                 bail!("number was expected, got {byte}")
             }
 
-            number_len.push(*byte);
+            number_len.push(byte);
         }
 
         bail!("':' character was expected");
@@ -117,7 +171,7 @@ impl<'de, T: Iterator<Item = &'de u8>> Deserializer<'de, T> {
         let next = self.data.next().ok_or(anyhow!("Empty bencode"))?;
 
         match next {
-            x if x.is_ascii_digit() => Ok(ElemenentParse::String(self.get_string_bytes(x as &u8)?)),
+            x if x.is_ascii_digit() => Ok(ElemenentParse::String(self.get_string_bytes(x)?)),
             b'i' => Ok(ElemenentParse::Integer(self.get_int()?)),
             b'l' => Ok(ElemenentParse::List),
             b'd' => Ok(ElemenentParse::Map),
@@ -126,3 +180,24 @@ impl<'de, T: Iterator<Item = &'de u8>> Deserializer<'de, T> {
         }
     }
 }
+
+// impl<'de, T: Iterator<Item = &'de u8>> SeqAccess<'de> for Deserializer<'de, T> {
+//     type Error = crate::error::Error;
+
+//     fn next_element_seed<U>(
+//         &mut self,
+//         seed: U,
+//     ) -> std::result::Result<Option<U::Value>, Self::Error>
+//     where
+//         U: serde::de::DeserializeSeed<'de>,
+//     {
+//         match self.get_next_element()? {
+//             ElemenentParse::End => Ok(None),
+//             r => {
+//                 let deserialized = seed.deserialize(self);
+
+//                 Ok(self.get_next_element())
+//             }
+//         }
+//     }
+// }
