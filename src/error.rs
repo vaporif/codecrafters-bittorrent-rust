@@ -9,10 +9,10 @@ pub enum Error {
 }
 
 impl serde::de::Error for Error {
-    fn custom<T>(_: T) -> Self
+    fn custom<T>(msg: T) -> Self
     where
         T: std::fmt::Display,
     {
-        std::todo!()
+        Error::Other(anyhow::Error::msg(msg.to_string()))
     }
 }

@@ -15,8 +15,8 @@ where
     V: serde::de::Deserialize<'de>,
 {
     let mut iter = data.iter().copied();
-    let deserialize = Deserializer::new(&mut iter);
-    V::deserialize(deserialize).context("Failed")
+    let mut deserialize = Deserializer::new(&mut iter);
+    V::deserialize(&mut deserialize).context("Failed")
 }
 
 pub enum ElemenentParse {
@@ -29,6 +29,7 @@ pub enum ElemenentParse {
 
 struct Deserializer<'a, T: Iterator> {
     data: &'a mut T,
+    seq_parse: Option<ElemenentParse>,
 }
 
 impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
@@ -43,20 +44,19 @@ impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
     {
         match self.get_next_element()? {
             ElemenentParse::End => Ok(None),
-            _ => {
-                let ele = seed
-                    .deserialize(Deserializer::new(self.data))
-                    .context("deserialize failure")?;
+            seq => {
+                self.seq_parse = Some(seq);
+                let ele = seed.deserialize(self).context("deserialize failure")?;
                 Ok(Some(ele))
             }
         }
     }
 }
 
-impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for Deserializer<'a, T> {
+impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserializer<'a, T> {
     type Error = crate::error::Error;
 
-    fn deserialize_any<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_any<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
@@ -139,7 +139,10 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for Deserializer<
 
 impl<'a, T: Iterator<Item = u8>> Deserializer<'a, T> {
     fn new(data: &'a mut T) -> Self {
-        Self { data }
+        Self {
+            data,
+            seq_parse: None,
+        }
     }
 
     fn get_int(&mut self) -> Result<i64> {
@@ -191,6 +194,9 @@ impl<'a, T: Iterator<Item = u8>> Deserializer<'a, T> {
     }
 
     fn get_next_element(&mut self) -> Result<ElemenentParse> {
+        if let Some(next) = self.seq_parse.take() {
+            return Ok(next);
+        }
         let next = self.data.next().ok_or(anyhow!("Empty bencode"))?;
 
         match next {
@@ -199,28 +205,7 @@ impl<'a, T: Iterator<Item = u8>> Deserializer<'a, T> {
             b'l' => Ok(ElemenentParse::List),
             b'd' => Ok(ElemenentParse::Map),
             b'e' => Ok(ElemenentParse::End),
-            s => bail!("invalid character {}", s), // should be None
+            s => bail!("invalid character {}", s),
         }
     }
 }
-
-// impl<'de, T: Iterator<Item = &'de u8>> SeqAccess<'de> for Deserializer<'de, T> {
-//     type Error = crate::error::Error;
-
-//     fn next_element_seed<U>(
-//         &mut self,
-//         seed: U,
-//     ) -> std::result::Result<Option<U::Value>, Self::Error>
-//     where
-//         U: serde::de::DeserializeSeed<'de>,
-//     {
-//         match self.get_next_element()? {
-//             ElemenentParse::End => Ok(None),
-//             r => {
-//                 let deserialized = seed.deserialize(self);
-
-//                 Ok(self.get_next_element())
-//             }
-//         }
-//     }
-// }
