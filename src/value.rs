@@ -16,7 +16,7 @@ impl std::fmt::Display for Value {
             Value::Integer(number) => write!(f, "{}", number),
             Value::List(values) => write!(
                 f,
-                "{}",
+                "[{}]",
                 values
                     .iter()
                     .map(|e| format!("{}", e))
@@ -35,6 +35,18 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str("Any bencode value")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let mut result = Vec::new();
+        while let Some(ele) = seq.next_element()? {
+            result.push(ele);
+        }
+
+        Ok(Value::List(result))
     }
 
     fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>

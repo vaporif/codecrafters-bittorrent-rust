@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Context, Result};
-use serde::forward_to_deserialize_any;
+use serde::{de::SeqAccess, forward_to_deserialize_any};
 use std::todo;
 
 pub fn from_str<'de, T, V>(data: T) -> Result<V>
 where
-    T: AsRef<str> + 'de,
+    T: AsRef<str>,
     V: serde::de::Deserialize<'de>,
 {
     from_bytes(data.as_ref().as_bytes())
@@ -15,7 +15,8 @@ where
     V: serde::de::Deserialize<'de>,
 {
     let mut iter = data.iter().copied();
-    V::deserialize(Deserializer::new(&mut iter)).context("Failed")
+    let deserialize = Deserializer::new(&mut iter);
+    V::deserialize(deserialize).context("Failed")
 }
 
 pub enum ElemenentParse {
@@ -28,6 +29,30 @@ pub enum ElemenentParse {
 
 struct Deserializer<'a, T: Iterator> {
     data: &'a mut T,
+}
+
+impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
+    type Error = crate::error::Error;
+
+    fn next_element_seed<V>(
+        &mut self,
+        seed: V,
+    ) -> std::result::Result<Option<V::Value>, Self::Error>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        let res = match self.get_next_element()? {
+            ElemenentParse::End => Ok(None),
+            r => {
+                let ele = seed
+                    .deserialize(Deserializer::new(self.data))
+                    .context("deserialize failure")?;
+                return Ok(Some(ele));
+            }
+        };
+
+        res
+    }
 }
 
 impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for Deserializer<'a, T> {
@@ -73,11 +98,11 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for Deserializer<
         todo!()
     }
 
-    fn deserialize_seq<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_seq<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        visitor.visit_seq(self)
     }
 
     fn deserialize_tuple<V>(self, _: usize, _: V) -> std::result::Result<V::Value, Self::Error>
