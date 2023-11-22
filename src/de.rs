@@ -1,5 +1,8 @@
 use anyhow::{anyhow, bail, Context, Result};
-use serde::{de::SeqAccess, forward_to_deserialize_any};
+use serde::{
+    de::{MapAccess, SeqAccess},
+    forward_to_deserialize_any,
+};
 use std::todo;
 
 pub fn from_str<'de, T, V>(data: T) -> Result<V>
@@ -42,6 +45,8 @@ impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
     where
         V: serde::de::DeserializeSeed<'de>,
     {
+        //println!("Type of T: {}", std::any::type_name::<T>());
+        //println!("Type of V: {}", std::any::type_name::<V>());
         match self.get_next_element()? {
             ElemenentParse::End => Ok(None),
             seq => {
@@ -53,6 +58,33 @@ impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
     }
 }
 
+impl<'a, 'de, T: Iterator<Item = u8>> MapAccess<'de> for Deserializer<'a, T> {
+    type Error = crate::error::Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> std::result::Result<Option<K::Value>, Self::Error>
+    where
+        K: serde::de::DeserializeSeed<'de>,
+    {
+        //println!("Type of T: {}", std::any::type_name::<T>());
+        //println!("Type of K: {}", std::any::type_name::<K>());
+        match self.get_next_element()? {
+            ElemenentParse::End => Ok(None),
+            m => {
+                self.seq_parse = Some(m);
+                let ele = seed.deserialize(self).context("deserialize failure")?;
+                Ok(Some(ele))
+            }
+        }
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        seed.deserialize(self)
+    }
+}
+
 impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserializer<'a, T> {
     type Error = crate::error::Error;
 
@@ -60,6 +92,8 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
     where
         V: serde::de::Visitor<'de>,
     {
+        //println!("Type of T: {}", std::any::type_name::<T>());
+        //println!("Type of V: {}", std::any::type_name::<V>());
         match self.get_next_element()? {
             ElemenentParse::Integer(v) => visitor.visit_i64(v),
             ElemenentParse::String(v) => visitor.visit_bytes(&v),
@@ -69,7 +103,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
         }
     }
 
-    forward_to_deserialize_any! { enum i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bytes struct map char unit unit_struct option str string }
+    forward_to_deserialize_any! { enum i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bytes struct char unit unit_struct option str string }
 
     fn deserialize_bool<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
     where
@@ -78,11 +112,11 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
         todo!()
     }
 
-    fn deserialize_byte_buf<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_byte_buf<V>(self, v: V) -> std::result::Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        self.deserialize_any(v)
     }
 
     fn deserialize_newtype_struct<V>(
@@ -100,6 +134,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
     where
         V: serde::de::Visitor<'de>,
     {
+        //println!("Type of V: {}", std::any::type_name::<V>());
         visitor.visit_seq(self)
     }
 
@@ -134,6 +169,13 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
         V: serde::de::Visitor<'de>,
     {
         todo!()
+    }
+
+    fn deserialize_map<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_map(self)
     }
 }
 

@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::BTreeMap, format, write};
+
+use serde_bytes::ByteBuf;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq)]
@@ -6,7 +8,7 @@ pub enum Value {
     String(Vec<u8>),
     Integer(i64),
     List(Vec<Value>),
-    Dict(HashMap<Vec<u8>, Value>),
+    Dict(BTreeMap<Vec<u8>, Value>),
 }
 
 impl std::fmt::Display for Value {
@@ -20,10 +22,21 @@ impl std::fmt::Display for Value {
                 values
                     .iter()
                     .map(|e| format!("{}", e))
-                    .reduce(|acc, e| format!("{acc}, {e}"))
+                    .reduce(|acc, e| format!("{acc},{e}"))
                     .unwrap_or_default()
             ),
-            Value::Dict(_) => todo!(),
+            Value::Dict(dict) => {
+                let dict_string = dict
+                    .iter()
+                    .map(|(k, v)| {
+                        let key = String::from_utf8_lossy(k);
+                        let value = format!("{}", v);
+                        format!("\"{key}\":{value}")
+                    })
+                    .reduce(|acc, e| format!("{acc},{e}"))
+                    .unwrap_or_default();
+                write!(f, "{{{}}}", dict_string)
+            }
         }
     }
 }
@@ -49,11 +62,16 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         Ok(Value::List(result))
     }
 
-    fn visit_map<A>(self, _: A) -> Result<Self::Value, A::Error>
+    fn visit_map<A>(self, mut v: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::MapAccess<'de>,
     {
-        todo!()
+        let mut result = BTreeMap::new();
+        while let Some((k, v)) = v.next_entry::<ByteBuf, Value>()? {
+            result.insert(k.into_vec(), v);
+        }
+
+        Ok(Value::Dict(result))
     }
 
     fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
