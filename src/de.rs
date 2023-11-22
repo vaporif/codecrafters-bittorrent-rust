@@ -41,17 +41,15 @@ impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
     where
         V: serde::de::DeserializeSeed<'de>,
     {
-        let res = match self.get_next_element()? {
+        match self.get_next_element()? {
             ElemenentParse::End => Ok(None),
-            r => {
+            _ => {
                 let ele = seed
                     .deserialize(Deserializer::new(self.data))
                     .context("deserialize failure")?;
-                return Ok(Some(ele));
+                Ok(Some(ele))
             }
-        };
-
-        res
+        }
     }
 }
 
@@ -66,8 +64,8 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for Deserializer<
             ElemenentParse::Integer(v) => visitor.visit_i64(v),
             ElemenentParse::String(v) => visitor.visit_bytes(&v),
             ElemenentParse::List => self.deserialize_seq(visitor),
-            ElemenentParse::Map => todo!(),
-            ElemenentParse::End => todo!(),
+            ElemenentParse::Map => self.deserialize_map(visitor),
+            ElemenentParse::End => Err(crate::error::Error::UnexpectedEnd),
         }
     }
 

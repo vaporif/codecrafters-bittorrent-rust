@@ -49,6 +49,13 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         Ok(Value::List(result))
     }
 
+    fn visit_map<A>(self, _: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        todo!()
+    }
+
     fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,

@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("unexpected end")]
+    UnexpectedEnd,
     #[error("generic erroor")]
     Other(#[from] anyhow::Error),
 }
