@@ -17,4 +17,9 @@ pub enum Command {
         )]
         bencoded_value: String,
     },
+    #[command(long_about = "Print metadata info of a torrent")]
+    Info {
+        #[arg(name = "torrent path", help = "torrent path")]
+        torrent_path: String,
+    },
 }

@@ -4,7 +4,7 @@ use thiserror::Error;
 pub enum Error {
     #[error("unexpected end")]
     UnexpectedEnd,
-    #[error("generic erroor")]
+    #[error("generic error")]
     Other(#[from] anyhow::Error),
 }
 

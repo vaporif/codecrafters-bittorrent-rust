@@ -65,8 +65,8 @@ impl<'a, 'de, T: Iterator<Item = u8>> MapAccess<'de> for Deserializer<'a, T> {
     where
         K: serde::de::DeserializeSeed<'de>,
     {
-        //println!("Type of T: {}", std::any::type_name::<T>());
-        //println!("Type of K: {}", std::any::type_name::<K>());
+        // println!("Type of T: {}", std::any::type_name::<T>());
+        // println!("Type of K: {}", std::any::type_name::<K>());
         match self.get_next_element()? {
             ElemenentParse::End => Ok(None),
             m => {
@@ -92,8 +92,8 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
     where
         V: serde::de::Visitor<'de>,
     {
-        //println!("Type of T: {}", std::any::type_name::<T>());
-        //println!("Type of V: {}", std::any::type_name::<V>());
+        // println!("Type of T: {}", std::any::type_name::<T>());
+        // println!("Type of V: {}", std::any::type_name::<V>());
         match self.get_next_element()? {
             ElemenentParse::Integer(v) => visitor.visit_i64(v),
             ElemenentParse::String(v) => visitor.visit_bytes(&v),
@@ -103,7 +103,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
         }
     }
 
-    forward_to_deserialize_any! { enum i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bytes struct char unit unit_struct option str string }
+    forward_to_deserialize_any! { enum i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bytes struct char unit unit_struct option str string ignored_any }
 
     fn deserialize_bool<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
     where
@@ -157,18 +157,11 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
         todo!()
     }
 
-    fn deserialize_identifier<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_identifier<V>(self, v: V) -> std::result::Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
-    }
-
-    fn deserialize_ignored_any<V>(self, _: V) -> std::result::Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!()
+        self.deserialize_str(v)
     }
 
     fn deserialize_map<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
