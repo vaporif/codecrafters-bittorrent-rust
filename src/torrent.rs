@@ -4,6 +4,7 @@ use serde::de::Error;
 use serde::Serialize;
 use serde::{de::Visitor, Deserialize};
 use sha1::{Digest, Sha1};
+use std::writeln;
 
 use crate::prelude::*;
 
@@ -24,6 +25,13 @@ impl std::fmt::Display for TorrentMetadataInfo {
             writeln!(f, "Info Hash: {}", hash)?;
         }
 
+        writeln!(f, "Piece Length: {}", self.info.piece_length)?;
+
+        f.write_str("Piece Hashes:\n")?;
+        for hash in &self.info.pieces {
+            writeln!(f, "{}", hex::encode(hash))?;
+        }
+
         Ok(())
     }
 }
@@ -35,17 +43,18 @@ pub struct TorrentInfo {
     #[serde(rename = "piece length")]
     pub piece_length: i64,
     #[serde(
-        deserialize_with = "deserialize_vec_u8",
+        deserialize_with = "deserialize_hashes",
         serialize_with = "bytes_serialize"
     )]
-    pub pieces: Vec<u8>,
+    pub pieces: Vec<Vec<u8>>,
 }
 
-fn bytes_serialize<S>(x: &[u8], s: S) -> Result<S::Ok, S::Error>
+fn bytes_serialize<S>(x: &[Vec<u8>], s: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    s.serialize_bytes(x)
+    let bytes: Vec<u8> = x.iter().flatten().copied().collect();
+    s.serialize_bytes(&bytes)
 }
 impl TorrentMetadataInfo {
     pub fn compute_hash(&mut self) -> Result<()> {
@@ -59,11 +68,11 @@ impl TorrentMetadataInfo {
     }
 }
 
-pub fn deserialize_vec_u8<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+pub fn deserialize_hashes<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    deserializer.deserialize_byte_buf(VecVisitor)
+    deserializer.deserialize_byte_buf(HashesVisitor)
 }
 
 pub fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
@@ -98,10 +107,10 @@ impl<'de> Visitor<'de> for UrlVisitor {
     }
 }
 
-struct VecVisitor;
+struct HashesVisitor;
 
-impl<'de> Visitor<'de> for VecVisitor {
-    type Value = Vec<u8>;
+impl<'de> Visitor<'de> for HashesVisitor {
+    type Value = Vec<Vec<u8>>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("a valid Vec string")
@@ -111,6 +120,11 @@ impl<'de> Visitor<'de> for VecVisitor {
     where
         E: Error,
     {
-        Ok(v.to_vec())
+        let mut hashes = Vec::new();
+        for hash in v.chunks(20) {
+            hashes.push(hash.into())
+        }
+
+        Ok(hashes)
     }
 }
