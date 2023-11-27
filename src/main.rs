@@ -26,7 +26,10 @@ fn main() -> Result<()> {
         }
         Command::Peers { torrent_path } => {
             let torrent = TorrentMetadataInfo::from_file(torrent_path)?;
-            let tracker = TorrentConnection::new(torrent, cli.port);
+            let tracker = TorrentConnection::new(torrent, cli.port)
+                .context("Could not establish connection")?;
+
+            println!("{}", tracker.peers()?);
         }
     }
     Ok(())

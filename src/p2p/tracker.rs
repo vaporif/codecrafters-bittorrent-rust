@@ -37,6 +37,14 @@ pub struct PeersResponse {
     pub peers: Vec<SocketAddrV4>,
 }
 
+impl std::fmt::Display for PeersResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for peer in &self.peers {
+            writeln!(f, "{}", peer)?;
+        }
+        Ok(())
+    }
+}
 pub struct TorrentConnection {
     torrent: TorrentMetadataInfo,
     port: u16,
@@ -66,7 +74,14 @@ impl TorrentConnection {
             .send()
             .context("peers request has failed")?;
 
-        todo!()
+        let response = response
+            .bytes()
+            .context("Failed to get response byte stream")?;
+
+        let response: PeersResponse =
+            crate::from_bytes(response.as_ref()).context("Failed to decode response stream")?;
+
+        Ok(response)
     }
 }
 
