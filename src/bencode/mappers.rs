@@ -35,6 +35,15 @@ where
     s.serialize_bytes(&bytes)
 }
 
+pub fn bytes_urlencode_serialize<S>(x: &[u8], s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let string = String::from_utf8_lossy(x);
+    let encoded = urlencoding::encode(&string);
+    s.serialize_str(&encoded)
+}
+
 struct UrlVisitor;
 
 impl<'de> Visitor<'de> for UrlVisitor {

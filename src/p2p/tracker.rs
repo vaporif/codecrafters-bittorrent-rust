@@ -1,19 +1,22 @@
-use crate::bencode::deserialize_ips;
+use crate::bencode::*;
 use crate::prelude::*;
 use rand::{distributions::Alphanumeric, Rng};
 use reqwest::blocking;
 use serde::Deserialize;
+use std::dbg;
 use std::net::SocketAddrV4;
 
 use super::TorrentMetadataInfo;
 
 #[derive(serde::Serialize)]
 struct PeersRequest<'a> {
+    #[serde(serialize_with = "bytes_urlencode_serialize")]
     pub info_hash: [u8; 20],
     pub peer_id: &'a str,
     pub port: u16,
-    pub uploaded: usize,
-    pub downloaded: usize,
+    pub left: u64,
+    pub uploaded: u64,
+    pub downloaded: u64,
     pub compact: u8,
 }
 
@@ -23,6 +26,7 @@ impl<'a> PeersRequest<'a> {
             info_hash: torrent.info_hash,
             peer_id,
             port,
+            left: torrent.info.length,
             uploaded: 0,
             downloaded: 0,
             compact: 1,
@@ -35,6 +39,12 @@ pub struct PeersResponse {
     pub interval: u64,
     #[serde(deserialize_with = "deserialize_ips")]
     pub peers: Vec<SocketAddrV4>,
+}
+
+#[derive(Deserialize)]
+pub struct TorrentResponseFailure {
+    #[serde(rename = "failure reason")]
+    pub failure_reason: String,
 }
 
 impl std::fmt::Display for PeersResponse {
@@ -74,14 +84,23 @@ impl TorrentConnection {
             .send()
             .context("peers request has failed")?;
 
-        let response = response
-            .bytes()
-            .context("Failed to get response byte stream")?;
+        if response.status().is_success() {
+            let response = response.text()?;
+            dbg!(&response);
 
-        let response: PeersResponse =
-            crate::from_bytes(response.as_ref()).context("Failed to decode response stream")?;
+            let response: PeersResponse =
+                crate::from_str(response).context("Failed to decode response stream")?;
 
-        Ok(response)
+            Ok(response)
+        } else {
+            let response = response.text()?;
+            dbg!(&response);
+
+            let response: TorrentResponseFailure =
+                crate::from_str(response).context("Failed to decode response stream in failure")?;
+
+            Err(anyhow::anyhow!(response.failure_reason))
+        }
     }
 }
 

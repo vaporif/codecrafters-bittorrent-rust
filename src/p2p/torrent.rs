@@ -52,10 +52,10 @@ impl std::fmt::Display for TorrentMetadataInfo {
 
 #[derive(Deserialize, Serialize)]
 pub struct TorrentInfo {
-    pub length: i64,
+    pub length: u64,
     pub name: String,
     #[serde(rename = "piece length")]
-    pub piece_length: i64,
+    pub piece_length: u64,
     #[serde(
         deserialize_with = "deserialize_hashes",
         serialize_with = "bytes_serialize"
