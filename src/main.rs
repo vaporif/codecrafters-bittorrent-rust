@@ -9,11 +9,6 @@ mod p2p;
 mod prelude;
 
 fn main() -> Result<()> {
-    // let mut cli = Cli {
-    //     command: Command::Info {
-    //         torrent_path: "/Users/vaporif/Repos/codecrafters-bittorrent-rust/sample.torrent".into(),
-    //     },
-    // };
     let cli = Cli::parse();
     match cli.command {
         Command::Decode { bencoded_value } => {
@@ -30,8 +25,8 @@ fn main() -> Result<()> {
             println!("{}", value);
         }
         Command::Peers { torrent_path } => {
-            let metadata = TorrentMetadataInfo::from_file(torrent_path)?;
-            println!("{}", metadata);
+            let torrent = TorrentMetadataInfo::from_file(torrent_path)?;
+            let tracker = TorrentConnection::new(torrent, cli.port);
         }
     }
     Ok(())

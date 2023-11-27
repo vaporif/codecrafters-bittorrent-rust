@@ -1,4 +1,7 @@
-use std::{fmt, net::SocketAddrV4};
+use std::{
+    fmt,
+    net::{Ipv4Addr, SocketAddrV4},
+};
 
 use super::prelude::*;
 use reqwest::Url;
@@ -22,6 +25,14 @@ where
     D: serde::Deserializer<'de>,
 {
     deserializer.deserialize_bytes(IpsVisitor)
+}
+
+pub fn bytes_serialize<S>(x: &[Vec<u8>], s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let bytes: Vec<u8> = x.iter().flatten().copied().collect();
+    s.serialize_bytes(&bytes)
 }
 
 struct UrlVisitor;
@@ -84,8 +95,14 @@ impl<'de> Visitor<'de> for IpsVisitor {
     where
         E: serde::de::Error,
     {
-        todo!()
-        // let value = String::from_utf8_lossy(v);
-        // Url::parse(&value).map_err(E::custom)
+        let ips = v
+            .chunks_exact(6)
+            .map(|f| {
+                let ip = Ipv4Addr::new(f[0], f[1], f[2], f[3]);
+                let port = ((f[4] as u16) << 8) | f[5] as u16;
+                SocketAddrV4::new(ip, port)
+            })
+            .collect();
+        Ok(ips)
     }
 }

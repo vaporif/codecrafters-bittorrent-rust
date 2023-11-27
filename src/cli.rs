@@ -1,10 +1,14 @@
 use clap::{arg, command, Parser, Subcommand};
 
+const DEFAULT_PORT: u16 = 6881;
+
 #[derive(Parser)]
 #[command(author = "Dmytro Onypko", name = "Torrent Sample Client")]
 pub struct Cli {
     #[command(subcommand, name = "action")]
     pub command: Command,
+    #[arg(short, long, default_value_t = DEFAULT_PORT)]
+    pub port: u16,
 }
 
 #[derive(Subcommand)]
