@@ -1,3 +1,6 @@
+use std::net::{Ipv4Addr, SocketAddrV4};
+
+use crate::prelude::*;
 use clap::{arg, command, Parser, Subcommand};
 
 const DEFAULT_PORT: u16 = 6881;
@@ -36,4 +39,22 @@ pub enum Command {
         #[arg(name = "torrent path", help = "torrent path")]
         torrent_path: String,
     },
+    #[command(long_about = "Handshake")]
+    Handshake {
+        #[arg(name = "torrent path", help = "torrent path")]
+        torrent_path: String,
+        #[arg(name = "peer ip with port", help = "<peer_ip>:<peer_port>")]
+        peer: String,
+    },
+}
+
+pub fn pares_peer_arg(arg: &str) -> Result<SocketAddrV4> {
+    let parts: Vec<&str> = arg.split(':').collect();
+    if parts.len() != 2 {
+        bail!("please set ip correctly");
+    }
+    let ip = parts[0].parse::<Ipv4Addr>().context("failed to parse ip")?;
+    let port = parts[1].parse::<u16>().context("failed to parse port")?;
+
+    Ok(SocketAddrV4::new(ip, port))
 }

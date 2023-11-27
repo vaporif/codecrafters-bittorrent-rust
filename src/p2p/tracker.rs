@@ -1,7 +1,7 @@
 use crate::bencode::*;
 use crate::prelude::*;
 use rand::{distributions::Alphanumeric, Rng};
-use reqwest::blocking;
+use reqwest::Client;
 use serde::Deserialize;
 use std::net::SocketAddrV4;
 
@@ -58,32 +58,38 @@ pub struct TorrentConnection {
     torrent: TorrentMetadataInfo,
     port: u16,
     peer_id: String,
-    client: blocking::Client,
+    client: Client,
 }
 
 impl TorrentConnection {
     pub fn new(torrent: TorrentMetadataInfo, port: u16) -> Result<Self> {
-        let client = blocking::Client::builder()
+        let client = Client::builder()
             .build()
             .context("Could not create client")?;
         Ok(Self {
             torrent,
             port,
             client,
-            peer_id: generate_peer_id(),
+            peer_id: String::from_utf8(generate_peer_id().to_vec())?,
         })
     }
 
-    pub fn peers(&self) -> Result<PeersResponse> {
+    pub fn from_torrent_path(path: String, port: u16) -> Result<Self> {
+        let file = TorrentMetadataInfo::from_file(path)?;
+        Self::new(file, port)
+    }
+
+    pub async fn peers(&self) -> Result<PeersResponse> {
         let params = PeersRequest::new(&self.torrent, &self.peer_id, self.port);
         let response = self
             .client
             .get(self.torrent.announce.clone())
             .query(&params)
             .send()
+            .await
             .context("peers request has failed")?;
         let is_success = response.status().is_success();
-        let response_bytes = response.bytes().context("Failed to read response")?;
+        let response_bytes = response.bytes().await.context("Failed to read response")?;
 
         if is_success {
             let response: PeersResponse =
@@ -99,10 +105,13 @@ impl TorrentConnection {
     }
 }
 
-fn generate_peer_id() -> String {
-    rand::thread_rng()
+pub fn generate_peer_id() -> [u8; 20] {
+    let data: Vec<_> = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(20)
-        .map(char::from)
-        .collect()
+        .collect();
+
+    let mut arr = [0u8; 20];
+    arr.copy_from_slice(&data);
+    arr
 }
