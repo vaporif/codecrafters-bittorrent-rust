@@ -21,7 +21,7 @@ where
     V::deserialize(&mut deserialize).context("Failed")
 }
 
-pub enum ElemenentParse {
+enum ElemenentParse {
     Integer(i64),
     String(Vec<u8>),
     List,
@@ -35,7 +35,7 @@ struct Deserializer<'a, T: Iterator> {
 }
 
 impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
-    type Error = crate::error::Error;
+    type Error = super::error::Error;
 
     fn next_element_seed<V>(
         &mut self,
@@ -58,7 +58,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
 }
 
 impl<'a, 'de, T: Iterator<Item = u8>> MapAccess<'de> for Deserializer<'a, T> {
-    type Error = crate::error::Error;
+    type Error = super::error::Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> std::result::Result<Option<K::Value>, Self::Error>
     where
@@ -85,7 +85,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> MapAccess<'de> for Deserializer<'a, T> {
 }
 
 impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserializer<'a, T> {
-    type Error = crate::error::Error;
+    type Error = super::error::Error;
 
     fn deserialize_any<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
     where
@@ -98,7 +98,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
             ElemenentParse::String(v) => visitor.visit_bytes(&v),
             ElemenentParse::List => self.deserialize_seq(visitor),
             ElemenentParse::Map => self.deserialize_map(visitor),
-            ElemenentParse::End => Err(crate::error::Error::UnexpectedEnd),
+            ElemenentParse::End => Err(super::error::Error::UnexpectedEnd),
         }
     }
 

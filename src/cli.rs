@@ -27,4 +27,9 @@ pub enum Command {
         #[arg(name = "torrent path", help = "torrent path")]
         torrent_path: String,
     },
+    #[command(long_about = "Print ips of peers")]
+    Peers {
+        #[arg(name = "torrent path", help = "torrent path")]
+        torrent_path: String,
+    },
 }

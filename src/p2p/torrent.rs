@@ -6,6 +6,7 @@ use serde::{de::Visitor, Deserialize};
 use sha1::{Digest, Sha1};
 use std::writeln;
 
+use crate::bencode::{from_bytes, to_bytes};
 use crate::prelude::*;
 
 #[derive(Deserialize)]
@@ -15,6 +16,18 @@ pub struct TorrentMetadataInfo {
     pub info: TorrentInfo,
     #[serde(skip)]
     hash: Option<String>,
+}
+
+impl TorrentMetadataInfo {
+    pub fn from_file(torrent_path: String) -> Result<TorrentMetadataInfo> {
+        let torrent = std::fs::read(torrent_path).context("could not read torrent file")?;
+        let mut metadata: TorrentMetadataInfo =
+            from_bytes(&torrent).context("invalid torrent file")?;
+        metadata
+            .compute_hash()
+            .context("Failed to compute hash of torrent")?;
+        Ok(metadata)
+    }
 }
 
 impl std::fmt::Display for TorrentMetadataInfo {
@@ -58,7 +71,7 @@ where
 }
 impl TorrentMetadataInfo {
     pub fn compute_hash(&mut self) -> Result<()> {
-        let info_bytes = crate::ser::to_bytes(&self.info).context("Failed to serialize")?;
+        let info_bytes = to_bytes(&self.info).context("Failed to serialize")?;
         // println!("Serialized: {}", String::from_utf8_lossy(&info_bytes));
         let mut hasher = Sha1::new();
         hasher.update(&info_bytes);
@@ -68,14 +81,14 @@ impl TorrentMetadataInfo {
     }
 }
 
-pub fn deserialize_hashes<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
+fn deserialize_hashes<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     deserializer.deserialize_byte_buf(HashesVisitor)
 }
 
-pub fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

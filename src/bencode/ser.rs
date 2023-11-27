@@ -1,3 +1,4 @@
+use super::prelude::*;
 use anyhow::Result;
 use serde::ser::SerializeMap;
 use std::collections::BTreeMap;
@@ -13,7 +14,7 @@ where
     Ok(serializer.data.clone())
 }
 
-pub struct Serializer {
+struct Serializer {
     data: Vec<u8>,
     omit_prefix: bool,
 }
@@ -38,7 +39,7 @@ impl Serializer {
     }
 }
 
-pub struct SerializerMap<'a> {
+struct SerializerMap<'a> {
     ser: &'a mut Serializer,
     entries: BTreeMap<Vec<u8>, Vec<u8>>,
     current_key: Option<Vec<u8>>,
@@ -57,7 +58,7 @@ impl<'a> SerializerMap<'a> {
 impl<'a> serde::ser::SerializeSeq for &'a mut Serializer {
     type Ok = ();
 
-    type Error = crate::error::Error;
+    type Error = super::error::Error;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> std::result::Result<(), Self::Error>
     where
@@ -74,7 +75,7 @@ impl<'a> serde::ser::SerializeSeq for &'a mut Serializer {
 
 impl<'a> serde::ser::SerializeTuple for &'a mut Serializer {
     type Ok = ();
-    type Error = crate::error::Error;
+    type Error = Error;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> std::result::Result<(), Self::Error>
     where
@@ -91,7 +92,7 @@ impl<'a> serde::ser::SerializeTuple for &'a mut Serializer {
 
 impl<'a> serde::ser::SerializeTupleStruct for &'a mut Serializer {
     type Ok = ();
-    type Error = crate::error::Error;
+    type Error = Error;
 
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> std::result::Result<(), Self::Error>
     where
@@ -108,7 +109,7 @@ impl<'a> serde::ser::SerializeTupleStruct for &'a mut Serializer {
 
 impl<'a> serde::ser::SerializeTupleVariant for &'a mut Serializer {
     type Ok = ();
-    type Error = crate::error::Error;
+    type Error = Error;
 
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> std::result::Result<(), Self::Error>
     where
@@ -126,7 +127,7 @@ impl<'a> serde::ser::SerializeTupleVariant for &'a mut Serializer {
 impl<'a> serde::ser::SerializeMap for SerializerMap<'a> {
     type Ok = ();
 
-    type Error = crate::error::Error;
+    type Error = Error;
 
     fn serialize_key<T: ?Sized>(&mut self, key: &T) -> std::result::Result<(), Self::Error>
     where
@@ -182,7 +183,7 @@ impl<'a> serde::ser::SerializeMap for SerializerMap<'a> {
 impl<'a> serde::ser::SerializeStruct for SerializerMap<'a> {
     type Ok = ();
 
-    type Error = crate::error::Error;
+    type Error = Error;
 
     fn serialize_field<T: ?Sized>(
         &mut self,
@@ -203,7 +204,7 @@ impl<'a> serde::ser::SerializeStruct for SerializerMap<'a> {
 impl<'a> serde::ser::SerializeStructVariant for &'a mut Serializer {
     type Ok = ();
 
-    type Error = crate::error::Error;
+    type Error = Error;
 
     fn serialize_field<T: ?Sized>(
         &mut self,
@@ -224,7 +225,7 @@ impl<'a> serde::ser::SerializeStructVariant for &'a mut Serializer {
 impl<'a> serde::ser::Serializer for &'a mut Serializer {
     type Ok = ();
 
-    type Error = crate::error::Error;
+    type Error = Error;
 
     type SerializeSeq = Self;
 
