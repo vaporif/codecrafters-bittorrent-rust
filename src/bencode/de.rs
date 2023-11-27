@@ -3,6 +3,7 @@ use serde::{
     forward_to_deserialize_any,
 };
 
+use super::prelude::*;
 use crate::prelude::*;
 pub fn from_str<'de, T, V>(data: T) -> Result<V>
 where
@@ -35,7 +36,7 @@ struct Deserializer<'a, T: Iterator> {
 }
 
 impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
-    type Error = super::error::Error;
+    type Error = Error;
 
     fn next_element_seed<V>(
         &mut self,
@@ -58,7 +59,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
 }
 
 impl<'a, 'de, T: Iterator<Item = u8>> MapAccess<'de> for Deserializer<'a, T> {
-    type Error = super::error::Error;
+    type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> std::result::Result<Option<K::Value>, Self::Error>
     where
@@ -85,7 +86,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> MapAccess<'de> for Deserializer<'a, T> {
 }
 
 impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserializer<'a, T> {
-    type Error = super::error::Error;
+    type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
     where
@@ -98,7 +99,7 @@ impl<'a, 'de, T: Iterator<Item = u8>> serde::Deserializer<'de> for &mut Deserial
             ElemenentParse::String(v) => visitor.visit_bytes(&v),
             ElemenentParse::List => self.deserialize_seq(visitor),
             ElemenentParse::Map => self.deserialize_map(visitor),
-            ElemenentParse::End => Err(super::error::Error::UnexpectedEnd),
+            ElemenentParse::End => Err(Error::UnexpectedEnd),
         }
     }
 
