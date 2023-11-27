@@ -35,12 +35,11 @@ where
     s.serialize_bytes(&bytes)
 }
 
-pub fn bytes_urlencode_serialize<S>(x: &[u8], s: S) -> Result<S::Ok, S::Error>
+pub fn bytes_lossy_string_serialize<S>(x: &[u8], s: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    let string = String::from_utf8_lossy(x);
-    let encoded = urlencoding::encode(&string);
+    let encoded = unsafe { String::from_utf8_unchecked(x.to_vec()) };
     s.serialize_str(&encoded)
 }
 
@@ -108,7 +107,7 @@ impl<'de> Visitor<'de> for IpsVisitor {
             .chunks_exact(6)
             .map(|f| {
                 let ip = Ipv4Addr::new(f[0], f[1], f[2], f[3]);
-                let port = ((f[4] as u16) << 8) | f[5] as u16;
+                let port = u16::from_be_bytes([f[4], f[5]]);
                 SocketAddrV4::new(ip, port)
             })
             .collect();

@@ -3,14 +3,13 @@ use crate::prelude::*;
 use rand::{distributions::Alphanumeric, Rng};
 use reqwest::blocking;
 use serde::Deserialize;
-use std::dbg;
 use std::net::SocketAddrV4;
 
 use super::TorrentMetadataInfo;
 
 #[derive(serde::Serialize)]
 struct PeersRequest<'a> {
-    #[serde(serialize_with = "bytes_urlencode_serialize")]
+    #[serde(serialize_with = "bytes_lossy_string_serialize")]
     pub info_hash: [u8; 20],
     pub peer_id: &'a str,
     pub port: u16,
@@ -83,21 +82,17 @@ impl TorrentConnection {
             .query(&params)
             .send()
             .context("peers request has failed")?;
+        let is_success = response.status().is_success();
+        let response_bytes = response.bytes().context("Failed to read response")?;
 
-        if response.status().is_success() {
-            let response = response.text()?;
-            dbg!(&response);
-
+        if is_success {
             let response: PeersResponse =
-                crate::from_str(response).context("Failed to decode response stream")?;
+                crate::from_bytes(&response_bytes).context("Failed to decode response stream")?;
 
             Ok(response)
         } else {
-            let response = response.text()?;
-            dbg!(&response);
-
-            let response: TorrentResponseFailure =
-                crate::from_str(response).context("Failed to decode response stream in failure")?;
+            let response: TorrentResponseFailure = crate::from_bytes(&response_bytes)
+                .context("Failed to decode response stream in failure")?;
 
             Err(anyhow::anyhow!(response.failure_reason))
         }
