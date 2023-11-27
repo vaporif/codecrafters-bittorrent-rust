@@ -16,3 +16,12 @@ impl serde::de::Error for Error {
         Error::Other(anyhow::Error::msg(msg.to_string()))
     }
 }
+
+impl serde::ser::Error for Error {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: std::fmt::Display,
+    {
+        Error::Other(anyhow::Error::msg(msg.to_string()))
+    }
+}

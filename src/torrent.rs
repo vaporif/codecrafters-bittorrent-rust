@@ -1,24 +1,34 @@
 use core::fmt;
 use reqwest::Url;
 use serde::de::Error;
+use serde::Serialize;
 use serde::{de::Visitor, Deserialize};
-use std::write;
+use sha1::{Digest, Sha1};
+
+use crate::prelude::*;
 
 #[derive(Deserialize)]
 pub struct TorrentMetadataInfo {
     #[serde(deserialize_with = "deserialize_url")]
     pub announce: Url,
     pub info: TorrentInfo,
+    #[serde(skip)]
+    hash: Option<String>,
 }
 
 impl std::fmt::Display for TorrentMetadataInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Tracker URL: {}", &self.announce)?;
-        writeln!(f, "Length: {}", self.info.length)
+        writeln!(f, "Tracker URL: {}", &self.announce)?;
+        writeln!(f, "Length: {}", self.info.length)?;
+        if let Some(ref hash) = self.hash {
+            writeln!(f, "Info Hash: {}", hash)?;
+        }
+
+        Ok(())
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct TorrentInfo {
     pub length: i64,
     #[serde(deserialize_with = "deserialize_vec_u8")]
@@ -27,6 +37,17 @@ pub struct TorrentInfo {
     pub piece_length: i64,
     #[serde(deserialize_with = "deserialize_vec_u8")]
     pub pieces: Vec<u8>,
+}
+
+impl TorrentMetadataInfo {
+    pub fn compute_hash(&mut self) -> Result<()> {
+        let info_bytes = crate::ser::to_bytes(&self.info).context("Failed to serialize")?;
+        let mut hasher = Sha1::new();
+        hasher.update(&info_bytes);
+        let hash = hex::encode(hasher.finalize());
+        self.hash = Some(hash);
+        Ok(())
+    }
 }
 
 pub fn deserialize_vec_u8<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>

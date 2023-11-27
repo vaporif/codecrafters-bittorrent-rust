@@ -17,6 +17,11 @@ pub enum Command {
         )]
         bencoded_value: String,
     },
+    #[command(long_about = "Encode Bencode Value")]
+    Encode {
+        #[arg(name = "value", help = "value to encode")]
+        value: String,
+    },
     #[command(long_about = "Print metadata info of a torrent")]
     Info {
         #[arg(name = "torrent path", help = "torrent path")]
