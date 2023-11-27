@@ -8,13 +8,14 @@ pub fn to_bytes<T>(data: T) -> Result<Vec<u8>>
 where
     T: serde::Serialize,
 {
-    let mut serializer = Serializer { data: Vec::new() };
+    let mut serializer = Serializer::new();
     data.serialize(&mut serializer)?;
     Ok(serializer.data.clone())
 }
 
 pub struct Serializer {
     data: Vec<u8>,
+    omit_prefix: bool,
 }
 
 impl Serializer {
@@ -23,6 +24,13 @@ impl Serializer {
         T: Iterator<Item = u8>,
     {
         self.data.extend(value);
+    }
+
+    fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            omit_prefix: false,
+        }
     }
 
     fn end(&mut self) {
@@ -130,7 +138,10 @@ impl<'a> serde::ser::SerializeMap for SerializerMap<'a> {
             return Err(err.into());
         }
 
-        let mut serializer = Serializer { data: Vec::new() };
+        let mut serializer = Serializer {
+            data: Vec::new(),
+            omit_prefix: true,
+        };
         key.serialize(&mut serializer)?;
         self.current_key = Some(serializer.data);
 
@@ -142,7 +153,7 @@ impl<'a> serde::ser::SerializeMap for SerializerMap<'a> {
         T: serde::Serialize,
     {
         if let Some(key) = self.current_key.take() {
-            let mut serializer = Serializer { data: Vec::new() };
+            let mut serializer = Serializer::new();
             value.serialize(&mut serializer)?;
             let value = serializer.data;
 
@@ -158,7 +169,9 @@ impl<'a> serde::ser::SerializeMap for SerializerMap<'a> {
     fn end(self) -> std::result::Result<Self::Ok, Self::Error> {
         self.ser.add("d".bytes());
         for (k, v) in self.entries.into_iter() {
-            self.ser.data.extend_from_slice(&k);
+            let mut serializer = Serializer::new();
+            serde::ser::Serializer::serialize_bytes(&mut serializer, &k)?;
+            self.ser.data.extend_from_slice(&serializer.data);
             self.ser.data.extend_from_slice(&v);
         }
         self.ser.add(END_CHAR.iter().copied());
@@ -285,7 +298,9 @@ impl<'a> serde::ser::Serializer for &'a mut Serializer {
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
         let mut r = Vec::new();
-        r.extend_from_slice(format!("{}:", v.len()).as_bytes());
+        if !self.omit_prefix {
+            r.extend_from_slice(format!("{}:", v.len()).as_bytes());
+        }
         r.extend_from_slice(v);
         self.add(r.into_iter());
         Ok(())

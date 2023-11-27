@@ -12,6 +12,11 @@ pub mod torrent;
 mod value;
 
 fn main() -> Result<()> {
+    // let mut cli = Cli {
+    //     command: Command::Info {
+    //         torrent_path: "/Users/vaporif/Repos/codecrafters-bittorrent-rust/sample.torrent".into(),
+    //     },
+    // };
     let cli = Cli::parse();
     match cli.command {
         Command::Decode { bencoded_value } => {

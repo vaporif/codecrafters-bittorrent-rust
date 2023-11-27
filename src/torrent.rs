@@ -31,17 +31,26 @@ impl std::fmt::Display for TorrentMetadataInfo {
 #[derive(Deserialize, Serialize)]
 pub struct TorrentInfo {
     pub length: i64,
-    #[serde(deserialize_with = "deserialize_vec_u8")]
-    pub name: Vec<u8>,
+    pub name: String,
     #[serde(rename = "piece length")]
     pub piece_length: i64,
-    #[serde(deserialize_with = "deserialize_vec_u8")]
+    #[serde(
+        deserialize_with = "deserialize_vec_u8",
+        serialize_with = "bytes_serialize"
+    )]
     pub pieces: Vec<u8>,
 }
 
+fn bytes_serialize<S>(x: &[u8], s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    s.serialize_bytes(x)
+}
 impl TorrentMetadataInfo {
     pub fn compute_hash(&mut self) -> Result<()> {
         let info_bytes = crate::ser::to_bytes(&self.info).context("Failed to serialize")?;
+        // println!("Serialized: {}", String::from_utf8_lossy(&info_bytes));
         let mut hasher = Sha1::new();
         hasher.update(&info_bytes);
         let hash = hex::encode(hasher.finalize());
