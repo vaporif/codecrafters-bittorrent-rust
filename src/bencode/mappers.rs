@@ -39,6 +39,8 @@ pub fn bytes_lossy_string_serialize<S>(x: &[u8], s: S) -> Result<S::Ok, S::Error
 where
     S: serde::Serializer,
 {
+    // NOTE: Just convert it to string, regardless if it is correct or not,
+    // reqwest will serde encode chars it will need
     let encoded = unsafe { String::from_utf8_unchecked(x.to_vec()) };
     s.serialize_str(&encoded)
 }
