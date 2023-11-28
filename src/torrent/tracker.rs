@@ -1,7 +1,7 @@
 use crate::bencode::*;
 use crate::prelude::*;
-use rand::{distributions::Alphanumeric, Rng};
 use reqwest::Client;
+use reqwest::Url;
 use serde::Deserialize;
 use std::net::SocketAddrV4;
 
@@ -9,10 +9,11 @@ use super::Bytes20;
 use super::TorrentMetadataInfo;
 
 #[derive(serde::Serialize)]
-struct PeersRequest<'a> {
+struct PeersRequest {
     #[serde(serialize_with = "bytes_lossy_string_serialize")]
     pub info_hash: Bytes20,
-    pub peer_id: &'a str,
+    #[serde(serialize_with = "bytes_lossy_string_serialize")]
+    pub peer_id: Bytes20,
     pub port: u16,
     pub left: u64,
     pub uploaded: u64,
@@ -20,8 +21,8 @@ struct PeersRequest<'a> {
     pub compact: u8,
 }
 
-impl<'a> PeersRequest<'a> {
-    pub fn new(torrent: &TorrentMetadataInfo, peer_id: &'a str, port: u16) -> Self {
+impl PeersRequest {
+    pub fn new(torrent: &TorrentMetadataInfo, peer_id: Bytes20, port: u16) -> Self {
         Self {
             info_hash: torrent.info_hash,
             peer_id,
@@ -42,7 +43,7 @@ pub struct PeersResponse {
 }
 
 #[derive(Deserialize)]
-pub struct TorrentResponseFailure {
+pub struct TrackerResponseFailure {
     #[serde(rename = "failure reason")]
     pub failure_reason: String,
 }
@@ -55,36 +56,26 @@ impl std::fmt::Display for PeersResponse {
         Ok(())
     }
 }
-pub struct TorrentConnection {
-    torrent: TorrentMetadataInfo,
+pub struct Tracker {
+    url: Url,
     port: u16,
-    peer_id: String,
-    client: Client,
+    peer_id: Bytes20,
 }
 
-impl TorrentConnection {
-    pub fn new(torrent: TorrentMetadataInfo, port: u16) -> Result<Self> {
-        let client = Client::builder()
-            .build()
-            .context("torrent reqwest::Client create")?;
-        Ok(Self {
-            torrent,
+impl Tracker {
+    pub fn new(url: &Url, port: u16, peer_id: Bytes20) -> Self {
+        Self {
+            url: url.clone(),
             port,
-            client,
-            peer_id: String::from_utf8(generate_peer_id().to_vec())?,
-        })
+            peer_id,
+        }
     }
 
-    pub fn from_torrent_path(path: String, port: u16) -> Result<Self> {
-        let file = TorrentMetadataInfo::from_file(path)?;
-        Self::new(file, port)
-    }
-
-    pub async fn peers(&self) -> Result<PeersResponse> {
-        let params = PeersRequest::new(&self.torrent, &self.peer_id, self.port);
-        let response = self
-            .client
-            .get(self.torrent.announce.clone())
+    pub async fn peers(&self, torrent_metadata: &TorrentMetadataInfo) -> Result<PeersResponse> {
+        let client = Client::new();
+        let params = PeersRequest::new(torrent_metadata, self.peer_id, self.port);
+        let response = client
+            .get(self.url.clone())
             .query(&params)
             .send()
             .await
@@ -98,21 +89,10 @@ impl TorrentConnection {
 
             Ok(response)
         } else {
-            let response: TorrentResponseFailure =
+            let response: TrackerResponseFailure =
                 crate::from_bytes(&response_bytes).context("parse peers failed response")?;
 
             Err(anyhow::anyhow!(response.failure_reason))
         }
     }
-}
-
-pub fn generate_peer_id() -> Bytes20 {
-    let data: Vec<_> = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(20)
-        .collect();
-
-    let mut arr = [0u8; 20];
-    arr.copy_from_slice(&data);
-    arr
 }

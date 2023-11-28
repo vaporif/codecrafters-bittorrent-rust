@@ -2,12 +2,12 @@ use bencode::*;
 use clap::Parser;
 use cli::{pares_peer_arg, Cli, Command};
 
-use crate::{p2p::*, prelude::*};
+use crate::{prelude::*, torrent::*};
 mod bencode;
 mod cli;
 mod common;
-mod p2p;
 mod prelude;
+mod torrent;
 
 #[tokio::main()]
 async fn main() -> Result<()> {
@@ -27,17 +27,18 @@ async fn main() -> Result<()> {
             println!("{}", value);
         }
         Command::Peers { torrent_path } => {
-            let tracker = TorrentConnection::from_torrent_path(torrent_path, cli.port)
-                .context("connecting to torren")?;
-
-            println!("{}", tracker.peers().await?);
+            let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
+            let peers = torrent.get_peers_tracker_response().await?;
+            println!("{}", peers);
         }
         Command::Handshake { torrent_path, peer } => {
             let peer = pares_peer_arg(&peer).context("parsing peer param")?;
             let metadata = TorrentMetadataInfo::from_file(torrent_path)?;
             let peer_id = generate_peer_id();
-            let peer = Peer::connect(peer, peer_id).await?;
-            let peer = peer.handshake(&metadata).await?;
+            let peer = Peer::from(peer, peer_id, metadata.info_hash)
+                .connect()
+                .await
+                .context("connecting to peer")?;
 
             println!("Peer ID: {}", peer.connected_peer_id_hex());
         }
@@ -54,8 +55,8 @@ async fn main() -> Result<()> {
                 bail!("is not a dir")
             }
 
-            let metadata = TorrentMetadataInfo::from_file(torrent_path)?;
-            let peer_id = generate_peer_id();
+            let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
+            let peers = torrent.get_peers().await?;
         }
     }
     Ok(())

@@ -94,63 +94,59 @@ pub struct PeerMessage {
     payload: Vec<u8>,
 }
 
-#[allow(unused)]
 pub struct Peer {
-    peer_ipsocket: SocketAddrV4,
+    socket_addr: SocketAddrV4,
     peer_id: Bytes20,
-    stream: TcpStream,
+    torrent_info_hash: Bytes20,
 }
 
-#[allow(unused)]
 pub struct PeerConnected {
+    socket_addr: SocketAddrV4,
     peer_id: Bytes20,
-    connected_peer_id: Bytes20,
+    remote_peer_id: Bytes20,
     stream: TcpStream,
     torrent_info_hash: Bytes20,
 }
 
 impl Peer {
-    pub async fn connect(peer_ipsocket: SocketAddrV4, peer_id: Bytes20) -> Result<Peer> {
-        let stream = TcpStream::connect(peer_ipsocket)
-            .await
-            .context("connection failed")?;
-        Ok(Peer {
-            peer_ipsocket,
+    pub fn from(socket_addr: SocketAddrV4, peer_id: Bytes20, torrent_info_hash: Bytes20) -> Peer {
+        Peer {
+            socket_addr,
             peer_id,
-            stream,
-        })
+            torrent_info_hash,
+        }
     }
 
-    pub async fn handshake<'a, T: WithInfoHash>(mut self, info: T) -> Result<PeerConnected> {
-        let handshake = Handshake::new(&info, self.peer_id);
-        self.stream
+    pub async fn connect(&self) -> Result<PeerConnected> {
+        let mut stream = TcpStream::connect(self.socket_addr)
+            .await
+            .context("establishing connection")?;
+        let handshake = Handshake::new(&self.torrent_info_hash, self.peer_id);
+        stream
             .write_all(&handshake.serialize())
             .await
             .context("Send handshake")?;
 
         let mut buffer = [0u8; HANDSHAKE_MEM_SIZE];
-        self.stream
+        stream
             .read_exact(&mut buffer)
             .await
             .with_context(|| format!("Read only {} bytes", buffer.len()))?;
 
         let handshake = Handshake::deserialize(buffer).context("deserialize handshake")?;
 
-        let Self {
-            peer_id, stream, ..
-        } = self;
-
         Ok(PeerConnected {
-            peer_id,
-            connected_peer_id: handshake.peer_id,
+            socket_addr: self.socket_addr,
+            peer_id: self.peer_id,
+            remote_peer_id: handshake.peer_id,
             stream,
-            torrent_info_hash: info.info_hash(),
+            torrent_info_hash: self.torrent_info_hash,
         })
     }
 }
 
 impl PeerConnected {
     pub fn connected_peer_id_hex(&self) -> String {
-        hex::encode(self.connected_peer_id)
+        hex::encode(self.remote_peer_id)
     }
 }
