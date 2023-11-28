@@ -45,7 +45,7 @@ impl Handshake {
 
         // unsafe { data.as_ptr().cast() as Handshake }
         let deserialized = Self {
-            length: data[0],
+            length,
             protocol: {
                 let mut protocol = [0; 19];
                 protocol.copy_from_slice(&data[1..20]);
