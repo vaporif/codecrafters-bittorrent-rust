@@ -1,6 +1,7 @@
 use bencode::*;
 use clap::Parser;
 use cli::{pares_peer_arg, Cli, Command};
+use rand::Rng;
 
 use crate::{prelude::*, torrent::*};
 mod bencode;
@@ -57,8 +58,25 @@ async fn main() -> Result<()> {
             }
 
             let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
-            let peers = torrent.get_peers().await?;
+            let mut peers = torrent.get_peers().await?;
+            if let Some(random_peer) = remove_random_element(&mut peers) {
+                let peer = random_peer
+                    .connect()
+                    .await
+                    .context("connecting to random peer")?;
+            } else {
+                bail!("No peers")
+            }
         }
     }
     Ok(())
+}
+
+fn remove_random_element<T>(vec: &mut Vec<T>) -> Option<T> {
+    if vec.is_empty() {
+        return None;
+    }
+    let mut rng = rand::thread_rng();
+    let index = rng.gen_range(0..vec.len());
+    Some(vec.remove(index))
 }
