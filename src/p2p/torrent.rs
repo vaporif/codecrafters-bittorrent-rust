@@ -3,11 +3,14 @@ use reqwest::Url;
 use serde::Deserialize;
 use serde::Serialize;
 use sha1::{Digest, Sha1};
+use std::borrow::Borrow;
 use std::writeln;
 
 use crate::bencode::{bytes_serialize, deserialize_hashes, deserialize_url};
 use crate::bencode::{from_bytes, to_bytes};
 use crate::prelude::*;
+
+use super::Bytes20;
 
 #[derive(Deserialize)]
 pub struct TorrentMetadataInfo {
@@ -15,7 +18,7 @@ pub struct TorrentMetadataInfo {
     pub announce: Url,
     pub info: TorrentInfo,
     #[serde(skip)]
-    pub info_hash: [u8; 20],
+    pub info_hash: Bytes20,
 }
 
 impl TorrentMetadataInfo {
@@ -27,10 +30,16 @@ impl TorrentMetadataInfo {
         let info_bytes = to_bytes(&metadata.info).context("Failed to serialize")?;
         let mut hasher = Sha1::new();
         hasher.update(&info_bytes);
-        let info_hash: [u8; 20] = hasher.finalize().into();
+        let info_hash: Bytes20 = hasher.finalize().into();
 
         metadata.info_hash = info_hash;
         Ok(metadata)
+    }
+}
+
+impl<T: Borrow<TorrentMetadataInfo>> super::WithInfoHash for T {
+    fn info_hash(&self) -> super::Bytes20 {
+        self.borrow().info_hash
     }
 }
 

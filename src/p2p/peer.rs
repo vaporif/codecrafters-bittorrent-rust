@@ -5,44 +5,47 @@ use tokio::{
     net::TcpStream,
 };
 
-use super::TorrentMetadataInfo;
+use super::{Bytes20, WithInfoHash};
 use crate::prelude::*;
 
 const BITTORRENT_PROTOCOL: &[u8; 19] = b"BitTorrent protocol";
+const BITTORRENT_PROTOCOL_LENGTH: u8 = BITTORRENT_PROTOCOL.len() as u8;
+const HANDSHAKE_MEM_SIZE: usize = std::mem::size_of::<Handshake>();
 
+#[repr(C)]
 pub struct Handshake {
     pub length: u8,
     pub protocol: [u8; 19],
     pub reserved: [u8; 8],
-    pub info_hash: [u8; 20],
-    pub peer_id: [u8; 20],
+    pub info_hash: Bytes20,
+    pub peer_id: Bytes20,
 }
 
 impl Handshake {
-    pub fn new(torrent: &TorrentMetadataInfo, peer_id: [u8; 20]) -> Self {
+    pub fn new<I: WithInfoHash>(info_hash_container: &I, peer_id: Bytes20) -> Self {
         Self {
-            length: 19,
+            length: BITTORRENT_PROTOCOL_LENGTH,
             protocol: BITTORRENT_PROTOCOL.to_owned(),
             reserved: [0; 8],
-            info_hash: torrent.info_hash,
+            info_hash: info_hash_container.info_hash(),
             peer_id,
         }
     }
 
-    pub fn serialize(&self) -> [u8; 68] {
-        let mut array: [u8; 68] = [0; 68];
-
-        array[0] = self.length;
-        array[1..20].copy_from_slice(&self.protocol);
-        array[20..28].copy_from_slice(&self.reserved);
-        array[28..48].copy_from_slice(&self.info_hash);
-        array[48..68].copy_from_slice(&self.peer_id);
-
-        array
+    pub fn serialize(&self) -> [u8; HANDSHAKE_MEM_SIZE] {
+        let pointer_to_serialized = self as *const Handshake as *const [u8; HANDSHAKE_MEM_SIZE];
+        unsafe { *pointer_to_serialized }
     }
 
-    pub fn deserialize(data: [u8; 68]) -> Self {
-        Self {
+    pub fn deserialize(data: [u8; 68]) -> Result<Self> {
+        let length = data[0];
+
+        if length != BITTORRENT_PROTOCOL_LENGTH {
+            bail!("Bittorrent lenght is expected {BITTORRENT_PROTOCOL_LENGTH} but got {length}")
+        }
+
+        // unsafe { data.as_ptr().cast() as Handshake }
+        let deserialized = Self {
             length: data[0],
             protocol: {
                 let mut protocol = [0; 19];
@@ -64,27 +67,51 @@ impl Handshake {
                 peer_id.copy_from_slice(&data[48..68]);
                 peer_id
             },
-        }
+        };
+
+        Ok(deserialized)
     }
+}
+
+#[repr(u8)]
+#[allow(dead_code)]
+enum PeerMessageId {
+    Choke = 0,
+    Unchoke = 1,
+    Interested = 2,
+    NotInterested = 3,
+    Have = 4,
+    Bitfield = 5,
+    Request = 6,
+    Piece = 7,
+    Cancel = 8,
+}
+
+#[allow(unused)]
+#[repr(C)]
+pub struct PeerMessage {
+    length: [u8; 4],
+    message_id: PeerMessageId,
+    payload: Vec<u8>,
 }
 
 #[allow(unused)]
 pub struct Peer {
     peer_ipsocket: SocketAddrV4,
-    peer_id: [u8; 20],
+    peer_id: Bytes20,
     stream: TcpStream,
 }
 
 #[allow(unused)]
-pub struct PeerConnected<'a> {
-    peer_id: [u8; 20],
-    connected_peer_id: [u8; 20],
+pub struct PeerConnected {
+    peer_id: Bytes20,
+    connected_peer_id: Bytes20,
     stream: TcpStream,
-    torrent: &'a TorrentMetadataInfo,
+    torrent_info_hash: Bytes20,
 }
 
 impl Peer {
-    pub async fn connect(peer_ipsocket: SocketAddrV4, peer_id: [u8; 20]) -> Result<Peer> {
+    pub async fn connect(peer_ipsocket: SocketAddrV4, peer_id: Bytes20) -> Result<Peer> {
         let stream = TcpStream::connect(peer_ipsocket)
             .await
             .context("connection failed")?;
@@ -95,20 +122,20 @@ impl Peer {
         })
     }
 
-    pub async fn handshake(mut self, metadata: &TorrentMetadataInfo) -> Result<PeerConnected> {
-        let handshake = Handshake::new(metadata, self.peer_id);
+    pub async fn handshake<'a, T: WithInfoHash>(mut self, info: T) -> Result<PeerConnected> {
+        let handshake = Handshake::new(&info, self.peer_id);
         self.stream
             .write_all(&handshake.serialize())
             .await
-            .context("Failed to do handshake")?;
+            .context("Send handshake")?;
 
-        let mut buffer = [0u8; 68];
+        let mut buffer = [0u8; HANDSHAKE_MEM_SIZE];
         self.stream
             .read_exact(&mut buffer)
             .await
             .with_context(|| format!("Read only {} bytes", buffer.len()))?;
 
-        let handshake = Handshake::deserialize(buffer);
+        let handshake = Handshake::deserialize(buffer).context("deserialize handshake")?;
 
         let Self {
             peer_id, stream, ..
@@ -118,12 +145,12 @@ impl Peer {
             peer_id,
             connected_peer_id: handshake.peer_id,
             stream,
-            torrent: metadata,
+            torrent_info_hash: info.info_hash(),
         })
     }
 }
 
-impl<'a> PeerConnected<'a> {
+impl PeerConnected {
     pub fn connected_peer_id_hex(&self) -> String {
         hex::encode(self.connected_peer_id)
     }

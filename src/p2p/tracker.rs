@@ -5,12 +5,13 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::net::SocketAddrV4;
 
+use super::Bytes20;
 use super::TorrentMetadataInfo;
 
 #[derive(serde::Serialize)]
 struct PeersRequest<'a> {
     #[serde(serialize_with = "bytes_lossy_string_serialize")]
-    pub info_hash: [u8; 20],
+    pub info_hash: Bytes20,
     pub peer_id: &'a str,
     pub port: u16,
     pub left: u64,
@@ -105,7 +106,7 @@ impl TorrentConnection {
     }
 }
 
-pub fn generate_peer_id() -> [u8; 20] {
+pub fn generate_peer_id() -> Bytes20 {
     let data: Vec<_> = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(20)
