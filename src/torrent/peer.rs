@@ -146,6 +146,22 @@ impl Peer {
     }
 }
 
+impl From<PeerConnected> for Peer {
+    fn from(value: PeerConnected) -> Self {
+        let PeerConnected {
+            socket_addr,
+            peer_id,
+            torrent_info_hash,
+            ..
+        } = value;
+        Peer {
+            socket_addr,
+            peer_id,
+            torrent_info_hash,
+        }
+    }
+}
+
 impl PeerConnected {
     pub fn connected_peer_id_hex(&self) -> String {
         hex::encode(self.remote_peer_id)
