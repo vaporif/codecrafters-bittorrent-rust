@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
             let peer = pares_peer_arg(&peer).context("parsing peer param")?;
             let metadata = TorrentMetadataInfo::from_file(torrent_path)?;
             let peer_id = generate_peer_id();
-            let peer = Peer::from(peer, peer_id, metadata.info_hash)
+            let peer = Peer::from(peer, peer_id, metadata.info_hash.into())
                 .connect()
                 .await
                 .context("connecting to peer")?;

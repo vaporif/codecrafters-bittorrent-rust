@@ -5,7 +5,6 @@ use reqwest::Url;
 use serde::Deserialize;
 use std::net::SocketAddrV4;
 
-use super::Bytes20;
 use super::TorrentMetadataInfo;
 
 #[derive(serde::Serialize)]
@@ -22,10 +21,10 @@ struct PeersRequest {
 }
 
 impl PeersRequest {
-    pub fn new(torrent: &TorrentMetadataInfo, peer_id: Bytes20, port: u16) -> Self {
+    pub fn new(torrent: &TorrentMetadataInfo, peer_id: PeerId, port: u16) -> Self {
         Self {
             info_hash: torrent.info_hash,
-            peer_id,
+            peer_id: peer_id.into(),
             port,
             left: torrent.info.length,
             uploaded: 0,
@@ -59,11 +58,11 @@ impl std::fmt::Display for PeersResponse {
 pub struct Tracker {
     url: Url,
     port: u16,
-    peer_id: Bytes20,
+    peer_id: PeerId,
 }
 
 impl Tracker {
-    pub fn new(url: &Url, port: u16, peer_id: Bytes20) -> Self {
+    pub fn new(url: &Url, port: u16, peer_id: PeerId) -> Self {
         Self {
             url: url.clone(),
             port,

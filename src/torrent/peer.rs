@@ -16,17 +16,17 @@ pub struct Handshake {
     pub length: u8,
     pub protocol: [u8; 19],
     pub reserved: [u8; 8],
-    pub info_hash: Bytes20,
-    pub peer_id: Bytes20,
+    pub info_hash: TorrentInfoHash,
+    pub peer_id: PeerId,
 }
 
 impl Handshake {
-    pub fn new<I: WithInfoHash>(info_hash_container: &I, peer_id: Bytes20) -> Self {
+    pub fn new(info_hash: TorrentInfoHash, peer_id: PeerId) -> Self {
         Self {
             length: BITTORRENT_PROTOCOL_LENGTH,
             protocol: BITTORRENT_PROTOCOL.to_owned(),
             reserved: [0; 8],
-            info_hash: info_hash_container.info_hash(),
+            info_hash,
             peer_id,
         }
     }
@@ -59,12 +59,12 @@ impl Handshake {
             info_hash: {
                 let mut info_hash = [0; 20];
                 info_hash.copy_from_slice(&data[28..48]);
-                info_hash
+                info_hash.into()
             },
             peer_id: {
                 let mut peer_id = [0; 20];
                 peer_id.copy_from_slice(&data[48..68]);
-                peer_id
+                peer_id.into()
             },
         };
 
@@ -96,21 +96,25 @@ pub struct PeerMessage {
 
 pub struct Peer {
     socket_addr: SocketAddrV4,
-    peer_id: Bytes20,
-    torrent_info_hash: Bytes20,
+    peer_id: PeerId,
+    torrent_info_hash: TorrentInfoHash,
 }
 
 #[allow(unused)]
 pub struct PeerConnected {
     socket_addr: SocketAddrV4,
-    peer_id: Bytes20,
-    remote_peer_id: Bytes20,
+    peer_id: PeerId,
+    remote_peer_id: PeerId,
     stream: TcpStream,
-    torrent_info_hash: Bytes20,
+    torrent_info_hash: TorrentInfoHash,
 }
 
 impl Peer {
-    pub fn from(socket_addr: SocketAddrV4, peer_id: Bytes20, torrent_info_hash: Bytes20) -> Peer {
+    pub fn from(
+        socket_addr: SocketAddrV4,
+        peer_id: PeerId,
+        torrent_info_hash: TorrentInfoHash,
+    ) -> Peer {
         Peer {
             socket_addr,
             peer_id,
@@ -122,7 +126,7 @@ impl Peer {
         let mut stream = TcpStream::connect(self.socket_addr)
             .await
             .context("establishing connection")?;
-        let handshake = Handshake::new(&self.torrent_info_hash, self.peer_id);
+        let handshake = Handshake::new(self.torrent_info_hash, self.peer_id);
         stream
             .write_all(&handshake.serialize())
             .await
@@ -164,6 +168,7 @@ impl From<PeerConnected> for Peer {
 
 impl PeerConnected {
     pub fn connected_peer_id_hex(&self) -> String {
-        hex::encode(self.remote_peer_id)
+        let remote_peer_id: Bytes20 = self.remote_peer_id.into();
+        hex::encode(remote_peer_id)
     }
 }
