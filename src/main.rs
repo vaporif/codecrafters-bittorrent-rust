@@ -10,6 +10,7 @@ mod prelude;
 mod torrent;
 
 #[tokio::main()]
+#[allow(unused)]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {

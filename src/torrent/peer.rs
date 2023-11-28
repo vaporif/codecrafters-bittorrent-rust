@@ -100,6 +100,7 @@ pub struct Peer {
     torrent_info_hash: Bytes20,
 }
 
+#[allow(unused)]
 pub struct PeerConnected {
     socket_addr: SocketAddrV4,
     peer_id: Bytes20,
