@@ -5,6 +5,7 @@ use cli::{pares_peer_arg, Cli, Command};
 use crate::{p2p::*, prelude::*};
 mod bencode;
 mod cli;
+mod common;
 mod p2p;
 mod prelude;
 
@@ -21,24 +22,40 @@ async fn main() -> Result<()> {
             println!("{}", metadata);
         }
         Command::Encode { value } => {
-            let value = to_bytes(value).context("Failed to encode")?;
+            let value = to_bytes(value).context("encoding to bencode")?;
             let value = String::from_utf8_lossy(&value);
             println!("{}", value);
         }
         Command::Peers { torrent_path } => {
             let tracker = TorrentConnection::from_torrent_path(torrent_path, cli.port)
-                .context("Could not establish connection")?;
+                .context("connecting to torren")?;
 
             println!("{}", tracker.peers().await?);
         }
         Command::Handshake { torrent_path, peer } => {
-            let peer = pares_peer_arg(&peer).context("Parsing peer arg failed")?;
+            let peer = pares_peer_arg(&peer).context("parsing peer param")?;
             let metadata = TorrentMetadataInfo::from_file(torrent_path)?;
             let peer_id = generate_peer_id();
             let peer = Peer::connect(peer, peer_id).await?;
             let peer = peer.handshake(&metadata).await?;
 
             println!("Peer ID: {}", peer.connected_peer_id_hex());
+        }
+        Command::Download {
+            torrent_path,
+            piece_number,
+            output,
+        } => {
+            let dir_path = std::path::Path::new(&output);
+            if !dir_path.exists() {
+                bail!("path not found");
+            }
+            if !dir_path.is_dir() {
+                bail!("is not a dir")
+            }
+
+            let metadata = TorrentMetadataInfo::from_file(torrent_path)?;
+            let peer_id = generate_peer_id();
         }
     }
     Ok(())

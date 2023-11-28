@@ -19,7 +19,7 @@ where
 {
     let mut iter = data.iter().copied();
     let mut deserialize = Deserializer::new(&mut iter);
-    V::deserialize(&mut deserialize).context("Failed")
+    V::deserialize(&mut deserialize).context("from_bytes deserialize")
 }
 
 enum ElemenentParse {
@@ -51,7 +51,9 @@ impl<'a, 'de, T: Iterator<Item = u8>> SeqAccess<'de> for Deserializer<'a, T> {
             ElemenentParse::End => Ok(None),
             seq => {
                 self.seq_parse = Some(seq);
-                let ele = seed.deserialize(self).context("deserialize failure")?;
+                let ele = seed
+                    .deserialize(self)
+                    .context("seq deserialize for bencode")?;
                 Ok(Some(ele))
             }
         }
@@ -71,7 +73,9 @@ impl<'a, 'de, T: Iterator<Item = u8>> MapAccess<'de> for Deserializer<'a, T> {
             ElemenentParse::End => Ok(None),
             m => {
                 self.seq_parse = Some(m);
-                let ele = seed.deserialize(self).context("deserialize failure")?;
+                let ele = seed
+                    .deserialize(self)
+                    .context("map deserialize for bencode")?;
                 Ok(Some(ele))
             }
         }

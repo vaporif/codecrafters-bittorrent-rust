@@ -66,7 +66,7 @@ impl TorrentConnection {
     pub fn new(torrent: TorrentMetadataInfo, port: u16) -> Result<Self> {
         let client = Client::builder()
             .build()
-            .context("Could not create client")?;
+            .context("torrent reqwest::Client create")?;
         Ok(Self {
             torrent,
             port,
@@ -88,18 +88,18 @@ impl TorrentConnection {
             .query(&params)
             .send()
             .await
-            .context("peers request has failed")?;
+            .context("get peers list")?;
         let is_success = response.status().is_success();
-        let response_bytes = response.bytes().await.context("Failed to read response")?;
+        let response_bytes = response.bytes().await.context("get peers response bytes")?;
 
         if is_success {
             let response: PeersResponse =
-                crate::from_bytes(&response_bytes).context("Failed to decode response stream")?;
+                crate::from_bytes(&response_bytes).context("parse peers response")?;
 
             Ok(response)
         } else {
-            let response: TorrentResponseFailure = crate::from_bytes(&response_bytes)
-                .context("Failed to decode response stream in failure")?;
+            let response: TorrentResponseFailure =
+                crate::from_bytes(&response_bytes).context("parse peers failed response")?;
 
             Err(anyhow::anyhow!(response.failure_reason))
         }

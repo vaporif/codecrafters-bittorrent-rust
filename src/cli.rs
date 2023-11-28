@@ -39,12 +39,26 @@ pub enum Command {
         #[arg(name = "torrent path", help = "torrent path")]
         torrent_path: String,
     },
-    #[command(long_about = "Handshake")]
+    #[command(long_about = "Handshake with peer")]
     Handshake {
         #[arg(name = "torrent path", help = "torrent path")]
         torrent_path: String,
         #[arg(name = "peer ip with port", help = "<peer_ip>:<peer_port>")]
         peer: String,
+    },
+    #[command(long_about = "Download piece")]
+    Download {
+        #[arg(name = "torrent path", help = "torrent path")]
+        torrent_path: String,
+        #[arg(name = "piece number")]
+        piece_number: u64,
+        #[arg(
+            long,
+            short,
+            name = "output path",
+            help = "output path for piece to download"
+        )]
+        output: String,
     },
 }
 

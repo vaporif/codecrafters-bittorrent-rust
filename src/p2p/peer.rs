@@ -5,7 +5,6 @@ use tokio::{
     net::TcpStream,
 };
 
-use super::{Bytes20, WithInfoHash};
 use crate::prelude::*;
 
 const BITTORRENT_PROTOCOL: &[u8; 19] = b"BitTorrent protocol";
@@ -41,7 +40,7 @@ impl Handshake {
         let length = data[0];
 
         if length != BITTORRENT_PROTOCOL_LENGTH {
-            bail!("Bittorrent lenght is expected {BITTORRENT_PROTOCOL_LENGTH} but got {length}")
+            bail!("Bittorrent length is expected {BITTORRENT_PROTOCOL_LENGTH} but got {length}")
         }
 
         // unsafe { data.as_ptr().cast() as Handshake }
