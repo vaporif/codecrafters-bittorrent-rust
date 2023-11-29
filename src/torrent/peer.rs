@@ -180,15 +180,15 @@ impl PeerMessage {
 
     fn get_message_id(&self) -> Result<u8> {
         let message_id = match self {
-            PeerMessage::Choke => 1,
-            PeerMessage::Unchoke => 2,
-            PeerMessage::Interested => 3,
-            PeerMessage::NotInterested => 4,
-            PeerMessage::Have(_) => 5,
-            PeerMessage::Bitfield(_) => 6,
-            PeerMessage::Request(_) => 7,
-            PeerMessage::Piece(_) => 8,
-            PeerMessage::Cancel => 9,
+            PeerMessage::Choke => 0,
+            PeerMessage::Unchoke => 1,
+            PeerMessage::Interested => 2,
+            PeerMessage::NotInterested => 3,
+            PeerMessage::Have(_) => 4,
+            PeerMessage::Bitfield(_) => 5,
+            PeerMessage::Request(_) => 6,
+            PeerMessage::Piece(_) => 7,
+            PeerMessage::Cancel => 8,
             PeerMessage::Heartbeat => bail!("Heartbeat has no message"),
         };
 
@@ -248,7 +248,6 @@ impl Decoder for PeerProtocolFramer {
             None
         };
 
-        let message_id = src[4];
         let message = PeerMessage::new(message_id, payload).context("Peer message parse")?;
         trace!("message is {}", message);
         src.advance(4 + length);
