@@ -1,11 +1,11 @@
-use std::{assert_eq, net::SocketAddrV4};
+use std::net::SocketAddrV4;
 
 use bytes::{Buf, BufMut};
+use futures::{sink::SinkExt, StreamExt};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use futures::sink::SinkExt;
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use crate::prelude::*;
@@ -75,6 +75,8 @@ impl Handshake {
     }
 }
 
+type AvailablePieces = Vec<u8>;
+
 #[allow(dead_code)]
 #[derive(Debug)]
 enum PeerMessage {
@@ -83,10 +85,70 @@ enum PeerMessage {
     Interested,
     NotInterested,
     Have(u8),
-    Bitfield(Vec<u8>),
-    Request,
-    Piece,
+    Bitfield(AvailablePieces),
+    Request(RequestBlock),
+    Piece(ReceivedBlock),
     Cancel,
+}
+
+// NOTE: 16 KB Big endian
+#[allow(dead_code)]
+const BLOCK_SIZE: [u8; 4] = [0x00, 0x00, 0x40, 0x00];
+
+#[allow(dead_code)]
+#[derive(Debug)]
+struct RequestBlock {
+    index: [u8; 4],
+    begin: [u8; 4],
+    length: [u8; 4],
+}
+
+impl From<&[u8]> for RequestBlock {
+    fn from(value: &[u8]) -> Self {
+        RequestBlock {
+            index: {
+                let mut index = [0; 4];
+                index.copy_from_slice(&value[..4]);
+                index
+            },
+            begin: {
+                let mut begin = [0; 4];
+                begin.copy_from_slice(&value[4..9]);
+                begin
+            },
+            length: {
+                let mut length = [0; 4];
+                length.copy_from_slice(&value[9..12]);
+                length
+            },
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+struct ReceivedBlock {
+    index: [u8; 4],
+    begin: [u8; 4],
+    block: Vec<u8>,
+}
+
+impl From<&[u8]> for ReceivedBlock {
+    fn from(value: &[u8]) -> Self {
+        ReceivedBlock {
+            index: {
+                let mut index = [0; 4];
+                index.copy_from_slice(&value[..4]);
+                index
+            },
+            begin: {
+                let mut begin = [0; 4];
+                begin.copy_from_slice(&value[4..9]);
+                begin
+            },
+            block: value[9..].to_vec(),
+        }
+    }
 }
 
 impl PeerMessage {
@@ -96,10 +158,10 @@ impl PeerMessage {
             1 => PeerMessage::Unchoke,
             2 => PeerMessage::Interested,
             3 => PeerMessage::NotInterested,
-            4 => PeerMessage::Have(payload.unwrap()[0]),
-            5 => PeerMessage::Bitfield(payload.unwrap()),
-            6 => PeerMessage::Request,
-            7 => PeerMessage::Piece,
+            4 => PeerMessage::Have(payload.context("payload expected")?[0]),
+            5 => PeerMessage::Bitfield(payload.context("payload expected")?),
+            6 => PeerMessage::Request(payload.context("payload expected")?.as_slice().into()),
+            7 => PeerMessage::Piece(payload.context("payload expected")?.as_slice().into()),
             8 => PeerMessage::Cancel,
             _ => bail!("Unknown message id {message_id}"),
         };
@@ -122,8 +184,8 @@ impl PeerMessage {
             PeerMessage::NotInterested => 4,
             PeerMessage::Have(_) => 5,
             PeerMessage::Bitfield(_) => 6,
-            PeerMessage::Request => 7,
-            PeerMessage::Piece => 8,
+            PeerMessage::Request(_) => 7,
+            PeerMessage::Piece(_) => 8,
             PeerMessage::Cancel => 9,
         }
     }
@@ -246,16 +308,41 @@ impl Peer {
     }
 }
 
+#[allow(unused_variables)]
 impl PeerConnected {
-    pub async fn receive_file(&mut self) -> Result<()> {
-        let bitfield = self
+    pub async fn receive_file(&mut self, piece: u64) -> Result<()> {
+        let received_msg = self
             .stream
             .next()
             .await
             .context("receiving new message")?
             .context("receiving bitfield")?;
-        assert_eq!(5, bitfield.get_message_id());
-        self.stream.send(PeerMessage::Choke).await.context("send choke");
+
+        let PeerMessage::Bitfield(_) = received_msg else {
+            bail!(
+                "Expected type of message bitfield got {}",
+                received_msg.get_message_id()
+            )
+        };
+
+        self.stream
+            .send(PeerMessage::Choke)
+            .await
+            .context("send choke")?;
+
+        let received_msg = self
+            .stream
+            .next()
+            .await
+            .context("receiving new message")?
+            .context("receiving bitfield")?;
+
+        let PeerMessage::Choke = received_msg else {
+            bail!(
+                "Expected type of message bitfield got {}",
+                received_msg.get_message_id()
+            )
+        };
         Ok(())
     }
 

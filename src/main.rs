@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
                     .await
                     .context("connecting to random peer")?;
 
-                peer.receive_file().await?;
+                peer.receive_file(piece_number).await?;
             } else {
                 bail!("No peers")
             }
