@@ -1,3 +1,4 @@
+use core::fmt;
 use std::net::SocketAddrV4;
 
 use bytes::{Buf, BufMut};
@@ -89,6 +90,7 @@ enum PeerMessage {
     Request(RequestBlock),
     Piece(ReceivedBlock),
     Cancel,
+    Heartbeat,
 }
 
 // NOTE: 16 KB Big endian
@@ -176,8 +178,8 @@ impl PeerMessage {
         }
     }
 
-    fn get_message_id(&self) -> u8 {
-        match self {
+    fn get_message_id(&self) -> Result<u8> {
+        let message_id = match self {
             PeerMessage::Choke => 1,
             PeerMessage::Unchoke => 2,
             PeerMessage::Interested => 3,
@@ -187,7 +189,16 @@ impl PeerMessage {
             PeerMessage::Request(_) => 7,
             PeerMessage::Piece(_) => 8,
             PeerMessage::Cancel => 9,
-        }
+            PeerMessage::Heartbeat => bail!("Heartbeat has no message"),
+        };
+
+        Ok(message_id)
+    }
+}
+
+impl fmt::Display for PeerMessage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -200,10 +211,13 @@ impl Decoder for PeerProtocolFramer {
 
     type Error = anyhow::Error;
 
+    #[instrument(skip(self))]
     fn decode(
         &mut self,
         src: &mut bytes::BytesMut,
     ) -> std::result::Result<Option<Self::Item>, Self::Error> {
+        trace!("Decoding, buf len is {}", src.len());
+
         if src.len() < PEER_MESSAGE_LENGTH {
             return Ok(None);
         }
@@ -212,16 +226,20 @@ impl Decoder for PeerProtocolFramer {
         length.copy_from_slice(&src[..PEER_MESSAGE_LENGTH]);
 
         let length = u32::from_be_bytes(length) as usize;
-        // NOTE: heartbeat
+        trace!("message len is {}", length);
+
         if length == 0 {
             src.advance(PEER_MESSAGE_LENGTH);
+            return Ok(Some(PeerMessage::Heartbeat));
         }
 
         if src.len() < PEER_MESSAGE_LENGTH + 1 + length {
+            trace!("not enough data");
             return Ok(None);
         }
 
         let payload = if src.len() > 5 {
+            trace!("got payload");
             Some(src[5..length + 4].to_vec())
         } else {
             None
@@ -229,6 +247,7 @@ impl Decoder for PeerProtocolFramer {
 
         let message_id = src[4];
         let message = PeerMessage::new(message_id, payload).context("Peer message parse")?;
+        trace!("{}", message);
         src.advance(4 + length);
         Ok(Some(message))
     }
@@ -236,17 +255,21 @@ impl Decoder for PeerProtocolFramer {
 impl Encoder<PeerMessage> for PeerProtocolFramer {
     type Error = anyhow::Error;
 
+    #[instrument(skip(self))]
     fn encode(
         &mut self,
         item: PeerMessage,
         dst: &mut bytes::BytesMut,
     ) -> std::result::Result<(), Self::Error> {
-        let message_id = item.get_message_id();
+        // Send heartbeats too
+        let message_id = item.get_message_id().context("get message id")?;
         let payload_bytes = item.get_message_bytes();
         let length = (payload_bytes.len() + 1).to_be_bytes();
         dst.extend_from_slice(&length);
         dst.put_u8(message_id);
         dst.extend_from_slice(&payload_bytes);
+
+        trace!("destination {:?}", dst);
 
         Ok(())
     }
@@ -284,6 +307,7 @@ impl<'a> Peer<'a> {
         }
     }
 
+    #[instrument(skip_all)]
     pub async fn connect(self) -> Result<PeerConnected<'a>> {
         let mut stream = TcpStream::connect(self.socket_addr)
             .await
@@ -315,19 +339,11 @@ impl<'a> Peer<'a> {
 
 #[allow(unused_variables)]
 impl<'a> PeerConnected<'a> {
+    #[instrument(skip(self))]
     pub async fn receive_file(&mut self, piece: u64) -> Result<()> {
-        let received_msg = self
-            .stream
-            .next()
-            .await
-            .context("receiving new message")?
-            .context("receiving bitfield")?;
-
+        let received_msg = self.next_message().await?;
         let PeerMessage::Bitfield(_) = received_msg else {
-            bail!(
-                "Expected type of message bitfield got {}",
-                received_msg.get_message_id()
-            )
+            bail!("Expected type of message bitfield got {}", received_msg)
         };
 
         self.stream
@@ -335,20 +351,31 @@ impl<'a> PeerConnected<'a> {
             .await
             .context("send choke")?;
 
-        let received_msg = self
-            .stream
-            .next()
-            .await
-            .context("receiving new message")?
-            .context("receiving bitfield")?;
+        let received_msg = self.next_message().await?;
 
         let PeerMessage::Choke = received_msg else {
-            bail!(
-                "Expected type of message bitfield got {}",
-                received_msg.get_message_id()
-            )
+            bail!("Expected type of message choke got {}", received_msg)
         };
         Ok(())
+    }
+
+    // TODO: Handle heartbeat spam
+    #[instrument(skip(self))]
+    async fn next_message(&mut self) -> Result<PeerMessage> {
+        loop {
+            let message = self
+                .stream
+                .next()
+                .await
+                .context("stream read error")?
+                .context("message expected")?;
+            trace!("Message {}", message);
+            if let PeerMessage::Heartbeat = message {
+                continue;
+            }
+
+            return Ok(message);
+        }
     }
 
     pub fn connected_peer_id_hex(&self) -> String {

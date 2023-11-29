@@ -14,6 +14,8 @@ mod torrent;
 #[allow(unused)]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    tracing_subscriber::fmt::init();
     match cli.command {
         Command::Decode { bencoded_value } => {
             let decoded: Value = from_str(bencoded_value)?;
