@@ -25,16 +25,16 @@ impl From<PeerId> for Bytes20 {
 }
 
 #[derive(Clone, Copy)]
-pub struct TorrentInfoHash(Bytes20);
+pub struct InfoHash(Bytes20);
 
-impl From<Bytes20> for TorrentInfoHash {
+impl From<Bytes20> for InfoHash {
     fn from(value: Bytes20) -> Self {
-        TorrentInfoHash(value)
+        InfoHash(value)
     }
 }
 
-impl From<TorrentInfoHash> for Bytes20 {
-    fn from(value: TorrentInfoHash) -> Self {
+impl From<InfoHash> for Bytes20 {
+    fn from(value: InfoHash) -> Self {
         value.0
     }
 }

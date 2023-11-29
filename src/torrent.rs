@@ -47,7 +47,12 @@ impl Torrent {
             .peers
             .into_iter()
             .map(|socket_addr| {
-                Peer::from(socket_addr, self.peer_id, self.metadata.info_hash.into())
+                Peer::from(
+                    socket_addr,
+                    self.peer_id,
+                    self.metadata.info_hash.into(),
+                    self.metadata.info.pieces.as_slice(),
+                )
             })
             .collect();
 

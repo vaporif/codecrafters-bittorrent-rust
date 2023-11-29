@@ -19,12 +19,12 @@ pub struct Handshake {
     pub length: u8,
     pub protocol: [u8; 19],
     pub reserved: [u8; 8],
-    pub info_hash: TorrentInfoHash,
+    pub info_hash: InfoHash,
     pub peer_id: PeerId,
 }
 
 impl Handshake {
-    pub fn new(info_hash: TorrentInfoHash, peer_id: PeerId) -> Self {
+    pub fn new(info_hash: InfoHash, peer_id: PeerId) -> Self {
         Self {
             length: BITTORRENT_PROTOCOL_LENGTH,
             protocol: BITTORRENT_PROTOCOL.to_owned(),
@@ -252,35 +252,39 @@ impl Encoder<PeerMessage> for PeerProtocolFramer {
     }
 }
 
-pub struct Peer {
+pub struct Peer<'a> {
     socket_addr: SocketAddrV4,
     peer_id: PeerId,
-    torrent_info_hash: TorrentInfoHash,
+    torrent_info_hash: InfoHash,
+    pieces_hash: &'a [Vec<u8>],
 }
 
 #[allow(unused)]
-pub struct PeerConnected {
+pub struct PeerConnected<'a> {
     socket_addr: SocketAddrV4,
     peer_id: PeerId,
     remote_peer_id: PeerId,
     stream: Framed<TcpStream, PeerProtocolFramer>,
-    torrent_info_hash: TorrentInfoHash,
+    torrent_info_hash: InfoHash,
+    pieces_hash: &'a [Vec<u8>],
 }
 
-impl Peer {
+impl<'a> Peer<'a> {
     pub fn from(
         socket_addr: SocketAddrV4,
         peer_id: PeerId,
-        torrent_info_hash: TorrentInfoHash,
+        torrent_info_hash: InfoHash,
+        pieces_hash: &'a [Vec<u8>],
     ) -> Peer {
         Peer {
             socket_addr,
             peer_id,
             torrent_info_hash,
+            pieces_hash,
         }
     }
 
-    pub async fn connect(self) -> Result<PeerConnected> {
+    pub async fn connect(self) -> Result<PeerConnected<'a>> {
         let mut stream = TcpStream::connect(self.socket_addr)
             .await
             .context("establishing connection")?;
@@ -304,12 +308,13 @@ impl Peer {
             remote_peer_id: handshake.peer_id,
             stream: Framed::new(stream, PeerProtocolFramer),
             torrent_info_hash: self.torrent_info_hash,
+            pieces_hash: self.pieces_hash,
         })
     }
 }
 
 #[allow(unused_variables)]
-impl PeerConnected {
+impl<'a> PeerConnected<'a> {
     pub async fn receive_file(&mut self, piece: u64) -> Result<()> {
         let received_msg = self
             .stream
