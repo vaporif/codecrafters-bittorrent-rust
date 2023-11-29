@@ -242,16 +242,13 @@ impl Decoder for PeerProtocolFramer {
         }
 
         let payload = if src.len() > 5 {
-            trace!("got payload");
             Some(src[5..length + 4].to_vec())
         } else {
             None
         };
 
         let message = PeerMessage::new(message_id, payload).context("Peer message parse")?;
-        trace!("message is {}", message);
         src.advance(4 + length);
-        trace!("buf len is {}", src.len());
         Ok(Some(message))
     }
 }
@@ -351,7 +348,7 @@ impl<'a> Peer<'a> {
 #[allow(unused_variables)]
 impl<'a> PeerConnected<'a> {
     #[instrument(skip(self))]
-    pub async fn receive_file(&mut self, piece: u64) -> Result<()> {
+    pub async fn receive_file_piece(&mut self, piece: u64) -> Result<()> {
         let received_msg = self.next_message().await?;
         let PeerMessage::Bitfield(_) = received_msg else {
             bail!("Expected type of message bitfield got {}", received_msg)
@@ -368,6 +365,10 @@ impl<'a> PeerConnected<'a> {
         };
 
         Ok(())
+    }
+
+    fn calc_blocks(&self) -> Vec<RequestBlock> {
+        todo!()
     }
 
     #[instrument(skip(self))]
