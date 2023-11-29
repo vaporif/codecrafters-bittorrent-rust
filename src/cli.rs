@@ -63,6 +63,18 @@ pub enum Command {
         )]
         output: PathBuf,
     },
+    #[command(long_about = "Download torrent")]
+    Download {
+        #[arg(name = "torrent path", help = "torrent path")]
+        torrent_path: PathBuf,
+        #[arg(
+            long,
+            short,
+            name = "output path",
+            help = "output path for piece to download"
+        )]
+        output: PathBuf,
+    },
 }
 
 pub fn pares_peer_arg(arg: &str) -> Result<SocketAddrV4> {

@@ -37,6 +37,30 @@ impl Torrent {
         }
     }
 
+    pub async fn download(&self, output: PathBuf) -> Result<()> {
+        let mut peers = self.get_peers().await?;
+        if let Some(random_peer) = remove_random_element(&mut peers) {
+            let mut peer = random_peer
+                .connect()
+                .await
+                .context("connecting to random peer")?;
+
+            let mut file_bytes = Vec::with_capacity(self.metadata.info.length as usize);
+            for (piece_number, _) in self.metadata.info.pieces.iter().enumerate() {
+                let piece_data = peer.receive_file_piece(piece_number).await?;
+                file_bytes.extend_from_slice(&piece_data);
+            }
+
+            tokio::fs::write(output, file_bytes)
+                .await
+                .context("writing torrent file")?;
+
+            return Ok(());
+        }
+
+        bail!("Peers not found");
+    }
+
     pub async fn get_peers_tracker_response(&self) -> Result<PeersResponse> {
         self.tracker
             .peers(&self.metadata)

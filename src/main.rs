@@ -1,7 +1,6 @@
 use bencode::*;
 use clap::Parser;
 use cli::{pares_peer_arg, Cli, Command};
-use rand::Rng;
 
 use crate::{prelude::*, torrent::*};
 mod bencode;
@@ -13,10 +12,8 @@ mod torrent;
 #[tokio::main()]
 #[allow(unused)]
 async fn main() -> Result<()> {
-    // tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
-
-    debug!("Cli is {:?}", cli);
     match cli.command {
         Command::Decode { bencoded_value } => {
             let decoded: Value = from_str(bencoded_value)?;
@@ -52,8 +49,6 @@ async fn main() -> Result<()> {
             piece_number,
             output,
         } => {
-            std::env::set_var("RUST_LOG", "trace");
-            tracing_subscriber::fmt::init();
             let dir_path = std::path::Path::new(&output);
 
             let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
@@ -71,15 +66,15 @@ async fn main() -> Result<()> {
                 bail!("No peers")
             }
         }
+        Command::Download {
+            torrent_path,
+            output,
+        } => {
+            let dir_path = std::path::Path::new(&output);
+
+            let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
+            torrent.download(output).await?;
+        }
     }
     Ok(())
-}
-
-fn remove_random_element<T>(vec: &mut Vec<T>) -> Option<T> {
-    if vec.is_empty() {
-        return None;
-    }
-    let mut rng = rand::thread_rng();
-    let index = rng.gen_range(0..vec.len());
-    Some(vec.remove(index))
 }

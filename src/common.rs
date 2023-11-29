@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+use rand::Rng;
 use sha1::{Digest, Sha1};
 
 use crate::prelude::*;
@@ -56,4 +57,13 @@ pub fn sha1_hash(value: &[u8]) -> Bytes20 {
     hasher.update(value);
     let hash: Bytes20 = hasher.finalize().into();
     hash
+}
+
+pub fn remove_random_element<T>(vec: &mut Vec<T>) -> Option<T> {
+    if vec.is_empty() {
+        return None;
+    }
+    let mut rng = rand::thread_rng();
+    let index = rng.gen_range(0..vec.len());
+    Some(vec.remove(index))
 }
