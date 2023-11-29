@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{net::SocketAddrV4, time::Duration};
+use std::{assert_eq, fmt::Debug, net::SocketAddrV4, time::Duration};
 
 use bytes::{Buf, BufMut};
 use futures::{sink::SinkExt, StreamExt};
@@ -10,6 +10,8 @@ use tokio::{
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use crate::prelude::*;
+
+use super::TorrentInfo;
 
 const BITTORRENT_PROTOCOL: &[u8; 19] = b"BitTorrent protocol";
 const BITTORRENT_PROTOCOL_LENGTH: u8 = BITTORRENT_PROTOCOL.len() as u8;
@@ -93,16 +95,38 @@ enum PeerMessage {
     Heartbeat,
 }
 
-// NOTE: 16 KB Big endian
 #[allow(dead_code)]
-const BLOCK_SIZE: [u8; 4] = [0x00, 0x00, 0x40, 0x00];
-
-#[allow(dead_code)]
-#[derive(Debug)]
 struct RequestBlock {
     index: [u8; 4],
     begin: [u8; 4],
     length: [u8; 4],
+}
+
+impl RequestBlock {
+    fn new(index: u32, begin: u32, length: u32) -> Self {
+        RequestBlock {
+            index: index.to_be_bytes(),
+            begin: begin.to_be_bytes(),
+            length: length.to_be_bytes(),
+        }
+    }
+
+    fn into_vec(self) -> Vec<u8> {
+        vec![self.index, self.begin, self.length]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+}
+
+impl Debug for RequestBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RequestBlock")
+            .field("index", &u32::from_be_bytes(self.index))
+            .field("begin", &u32::from_be_bytes(self.begin))
+            .field("length", &u32::from_be_bytes(self.length))
+            .finish()
+    }
 }
 
 impl From<&[u8]> for RequestBlock {
@@ -145,11 +169,25 @@ impl From<&[u8]> for ReceivedBlock {
             },
             begin: {
                 let mut begin = [0; 4];
-                begin.copy_from_slice(&value[4..9]);
+                begin.copy_from_slice(&value[4..8]);
                 begin
             },
-            block: value[9..].to_vec(),
+            block: value[8..].to_vec(),
         }
+    }
+}
+
+impl ReceivedBlock {
+    fn into_vec(self) -> Vec<u8> {
+        vec![
+            self.index.as_slice(),
+            self.begin.as_slice(),
+            self.block.as_slice(),
+        ]
+        .into_iter()
+        .flatten()
+        .copied()
+        .collect()
     }
 }
 
@@ -173,6 +211,8 @@ impl PeerMessage {
     fn get_message_bytes(self) -> Vec<u8> {
         match self {
             PeerMessage::Have(byte) => vec![byte],
+            PeerMessage::Request(bytes) => bytes.into_vec(),
+            PeerMessage::Piece(bytes) => bytes.into_vec(),
             PeerMessage::Bitfield(vec) => vec,
             _ => Vec::new(),
         }
@@ -211,7 +251,8 @@ impl Decoder for PeerProtocolFramer {
 
     type Error = anyhow::Error;
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, src))]
+
     fn decode(
         &mut self,
         src: &mut bytes::BytesMut,
@@ -288,7 +329,7 @@ pub struct Peer<'a> {
     socket_addr: SocketAddrV4,
     peer_id: PeerId,
     torrent_info_hash: InfoHash,
-    pieces_hash: &'a [Vec<u8>],
+    torrent_info: &'a TorrentInfo,
 }
 
 #[allow(unused)]
@@ -298,7 +339,7 @@ pub struct PeerConnected<'a> {
     remote_peer_id: PeerId,
     stream: Framed<TcpStream, PeerProtocolFramer>,
     torrent_info_hash: InfoHash,
-    pieces_hash: &'a [Vec<u8>],
+    torrent_info: &'a TorrentInfo,
 }
 
 impl<'a> Peer<'a> {
@@ -306,13 +347,13 @@ impl<'a> Peer<'a> {
         socket_addr: SocketAddrV4,
         peer_id: PeerId,
         torrent_info_hash: InfoHash,
-        pieces_hash: &'a [Vec<u8>],
+        torrent_info: &'a TorrentInfo,
     ) -> Peer {
         Peer {
             socket_addr,
             peer_id,
             torrent_info_hash,
-            pieces_hash,
+            torrent_info,
         }
     }
 
@@ -341,20 +382,60 @@ impl<'a> Peer<'a> {
             remote_peer_id: handshake.peer_id,
             stream: Framed::new(stream, PeerProtocolFramer),
             torrent_info_hash: self.torrent_info_hash,
-            pieces_hash: self.pieces_hash,
+            torrent_info: self.torrent_info,
         })
+    }
+}
+
+impl TorrentInfo {
+    fn calc_blocks(&self, piece_num: usize) -> Vec<RequestBlock> {
+        // NOTE: 16 KB Big endian
+        const BLOCK_SIZE: u32 = 16 * 1024;
+        let num_of_pieces = self.pieces.len();
+        let indexes_of_pieces = num_of_pieces - 1;
+        let mut last_piece_size = self.length / self.piece_length;
+        if num_of_pieces == 1 {
+            last_piece_size = self.piece_length;
+        }
+
+        let is_last_piece = piece_num == indexes_of_pieces;
+
+        let block_count = if is_last_piece {
+            (last_piece_size as f32 / BLOCK_SIZE as f32).ceil() as usize
+        } else {
+            (self.piece_length as f32 / BLOCK_SIZE as f32).ceil() as usize
+        };
+
+        (0..block_count)
+            .map(|index| {
+                let is_last_block = index == block_count - 1;
+                let begin = piece_num as u32 * BLOCK_SIZE;
+                RequestBlock::new(piece_num as u32, begin, BLOCK_SIZE)
+            })
+            .collect()
     }
 }
 
 #[allow(unused_variables)]
 impl<'a> PeerConnected<'a> {
     #[instrument(skip(self))]
-    pub async fn receive_file_piece(&mut self, piece: u64) -> Result<()> {
+    fn get_piece_hash(&self, piece: usize) -> Result<&[u8]> {
+        self.torrent_info
+            .pieces
+            .get(piece)
+            .map(|f| f.as_slice())
+            .ok_or(anyhow!("Piece not found"))
+    }
+
+    #[instrument(skip(self))]
+    pub async fn receive_file_piece(&mut self, piece_num: usize) -> Result<()> {
+        let piece_hash = self.get_piece_hash(piece_num)?;
         let received_msg = self.next_message().await?;
         let PeerMessage::Bitfield(_) = received_msg else {
             bail!("Expected type of message bitfield got {}", received_msg)
         };
 
+        // TODO: Check if piece exists
         self.send_message(PeerMessage::Interested)
             .await
             .context("Send interested")?;
@@ -365,11 +446,28 @@ impl<'a> PeerConnected<'a> {
             bail!("Expected type of message unchoke got {}", received_msg)
         };
 
-        Ok(())
-    }
+        let blocks = self.torrent_info.calc_blocks(piece_num);
 
-    fn calc_blocks(&self) -> Vec<RequestBlock> {
-        todo!()
+        let mut result = Vec::new();
+
+        for (i, block) in blocks.into_iter().enumerate() {
+            trace!("Requesting piece {piece_num} via block num {i}");
+            self.send_message(PeerMessage::Request(block))
+                .await
+                .context("send interested {i}")?;
+
+            let received_msg = self.next_message().await?;
+
+            let PeerMessage::Piece(piece_data) = received_msg else {
+                bail!("Expected type of message unchoke got {}", received_msg)
+            };
+
+            assert_eq!(u32::from_be_bytes(piece_data.index), piece_num as u32);
+
+            result.extend_from_slice(&piece_data.block);
+        }
+
+        Ok(())
     }
 
     #[instrument(skip(self))]

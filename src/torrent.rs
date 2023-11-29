@@ -2,6 +2,8 @@ mod file;
 mod peer;
 mod tracker;
 
+use std::path::PathBuf;
+
 use crate::prelude::*;
 pub use file::*;
 pub use peer::*;
@@ -19,7 +21,7 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    pub fn from_file(file_path: String, port: u16) -> Result<Self> {
+    pub fn from_file(file_path: PathBuf, port: u16) -> Result<Self> {
         let metadata = TorrentMetadataInfo::from_file(file_path)?;
         Ok(Torrent::new(metadata, port))
     }
@@ -52,7 +54,7 @@ impl Torrent {
                     socket_addr,
                     self.peer_id,
                     self.metadata.info_hash.into(),
-                    self.metadata.info.pieces.as_slice(),
+                    &self.metadata.info,
                 )
             })
             .collect();

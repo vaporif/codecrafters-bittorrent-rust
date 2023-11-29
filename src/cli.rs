@@ -1,4 +1,7 @@
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::{
+    net::{Ipv4Addr, SocketAddrV4},
+    path::PathBuf,
+};
 
 use crate::prelude::*;
 use clap::{arg, command, Parser, Subcommand};
@@ -32,33 +35,33 @@ pub enum Command {
     #[command(long_about = "Print metadata info of a torrent")]
     Info {
         #[arg(name = "torrent path", help = "torrent path")]
-        torrent_path: String,
+        torrent_path: PathBuf,
     },
     #[command(long_about = "Print ips of peers")]
     Peers {
         #[arg(name = "torrent path", help = "torrent path")]
-        torrent_path: String,
+        torrent_path: PathBuf,
     },
     #[command(long_about = "Handshake with peer")]
     Handshake {
         #[arg(name = "torrent path", help = "torrent path")]
-        torrent_path: String,
+        torrent_path: PathBuf,
         #[arg(name = "peer ip with port", help = "<peer_ip>:<peer_port>")]
         peer: String,
     },
     #[command(name = "download_piece", long_about = "Download piece")]
     DownloadPiece {
         #[arg(name = "torrent path", help = "torrent path")]
-        torrent_path: String,
+        torrent_path: PathBuf,
         #[arg(name = "piece number")]
-        piece_number: u64,
+        piece_number: usize,
         #[arg(
             long,
             short,
             name = "output path",
             help = "output path for piece to download"
         )]
-        output: String,
+        output: PathBuf,
     },
 }
 

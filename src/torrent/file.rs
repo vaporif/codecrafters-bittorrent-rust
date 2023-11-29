@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sha1::{Digest, Sha1};
 use std::borrow::Borrow;
+use std::path::PathBuf;
 use std::writeln;
 
 use crate::bencode::{bytes_serialize, deserialize_hashes, deserialize_url};
@@ -20,7 +21,7 @@ pub struct TorrentMetadataInfo {
 }
 
 impl TorrentMetadataInfo {
-    pub fn from_file(torrent_path: String) -> Result<TorrentMetadataInfo> {
+    pub fn from_file(torrent_path: PathBuf) -> Result<TorrentMetadataInfo> {
         let torrent = std::fs::read(torrent_path).context("read torrent file")?;
         let mut metadata: TorrentMetadataInfo =
             from_bytes(&torrent).context("deserialize torrent file")?;
