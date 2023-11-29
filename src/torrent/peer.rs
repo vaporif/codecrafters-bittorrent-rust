@@ -1,5 +1,5 @@
 use core::fmt;
-use std::net::SocketAddrV4;
+use std::{net::SocketAddrV4, time::Duration};
 
 use bytes::{Buf, BufMut};
 use futures::{sink::SinkExt, StreamExt};
@@ -380,11 +380,10 @@ impl<'a> PeerConnected<'a> {
     #[instrument(skip(self))]
     async fn next_message(&mut self) -> Result<PeerMessage> {
         loop {
-            let message = self
-                .stream
-                .next()
+            let message = tokio::time::timeout(Duration::from_secs(2), self.stream.next())
                 .await
-                .context("stream read error")?
+                .map(|m| m.context("stream closed")?)
+                .context("timeout")?
                 .context("message expected")?;
             if let PeerMessage::Heartbeat = message {
                 continue;
