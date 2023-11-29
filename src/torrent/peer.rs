@@ -252,6 +252,7 @@ impl Decoder for PeerProtocolFramer {
         let message = PeerMessage::new(message_id, payload).context("Peer message parse")?;
         trace!("message is {}", message);
         src.advance(4 + length);
+        trace!("buf len is {}", src.len());
         Ok(Some(message))
     }
 }
@@ -264,15 +265,23 @@ impl Encoder<PeerMessage> for PeerProtocolFramer {
         item: PeerMessage,
         dst: &mut bytes::BytesMut,
     ) -> std::result::Result<(), Self::Error> {
-        // Send heartbeats too
+        if let PeerMessage::Heartbeat = item {
+            dst.copy_from_slice(&[0u8; 4]);
+            return Ok(());
+        }
+
         let message_id = item.get_message_id().context("get message id")?;
         let payload_bytes = item.get_message_bytes();
-        let length = (payload_bytes.len() + 1).to_be_bytes();
+        trace!("payload length {}", payload_bytes.len());
+        let length = PEER_MESSAGE_LENGTH + 1 + payload_bytes.len();
+        trace!("message len {length}");
+
+        let length = length.to_be_bytes();
         dst.extend_from_slice(&length);
         dst.put_u8(message_id);
         dst.extend_from_slice(&payload_bytes);
 
-        trace!("destination {:?}", dst);
+        trace!("destination buf {:?}", dst);
 
         Ok(())
     }
@@ -380,7 +389,7 @@ impl<'a> PeerConnected<'a> {
     #[instrument(skip(self))]
     async fn next_message(&mut self) -> Result<PeerMessage> {
         loop {
-            let message = tokio::time::timeout(Duration::from_secs(2), self.stream.next())
+            let message = tokio::time::timeout(Duration::from_secs(5), self.stream.next())
                 .await
                 .map(|m| m.context("stream closed")?)
                 .context("timeout")?
