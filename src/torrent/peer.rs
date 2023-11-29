@@ -5,7 +5,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use tokio_stream::StreamExt;
+use futures::sink::SinkExt;
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use crate::prelude::*;
@@ -255,6 +255,7 @@ impl PeerConnected {
             .context("receiving new message")?
             .context("receiving bitfield")?;
         assert_eq!(5, bitfield.get_message_id());
+        self.stream.send(PeerMessage::Choke).await.context("send choke");
         Ok(())
     }
 
