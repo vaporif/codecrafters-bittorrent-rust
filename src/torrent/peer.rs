@@ -387,6 +387,8 @@ impl<'a> Peer<'a> {
     }
 }
 
+// NOTE: 16 KB Big endian
+const BLOCK_SIZE: u32 = 16 * 1024;
 impl TorrentInfo {
     #[instrument(skip(self))]
     fn calc_blocks(&self, piece_num: usize) -> Vec<RequestBlock> {
@@ -396,28 +398,12 @@ impl TorrentInfo {
             self.piece_length,
             self.pieces.len()
         );
-        // NOTE: 16 KB Big endian
-        const BLOCK_SIZE: u32 = 16 * 1024;
-        let num_of_pieces = self.pieces.len();
-        let indexes_of_pieces = num_of_pieces - 1;
-        let mut last_piece_size = self.length / self.piece_length;
-        if num_of_pieces == 1 {
-            last_piece_size = self.piece_length;
-        }
+        let number_of_pieces = self.pieces.len();
 
-        let is_last_piece = piece_num == indexes_of_pieces;
-
-        let block_count = if is_last_piece {
-            (last_piece_size as f32 / BLOCK_SIZE as f32).ceil() as usize
-        } else {
-            (self.piece_length as f32 / BLOCK_SIZE as f32).ceil() as usize
-        };
-
-        trace!("bloc count: {block_count}");
-
-        let last_block_size =
-            (self.piece_length - (BLOCK_SIZE * (block_count as u32 - 1)) as u64) as u32;
-        trace!("last block size {last_block_size}");
+        let BlocksInfo {
+            block_count,
+            last_block_size,
+        } = calc_block_size(piece_num, self.length, self.piece_length, number_of_pieces);
 
         (0..block_count)
             .map(|index| {
@@ -432,6 +418,48 @@ impl TorrentInfo {
             })
             .collect()
     }
+}
+
+fn calc_block_size(
+    piece_num: usize,
+    length: u64,
+    piece_length: u64,
+    number_of_pieces: usize,
+) -> BlocksInfo {
+    let indexes_of_pieces = number_of_pieces - 1;
+    let full_pieces_count = number_of_pieces - 1;
+    let last_piece_size = if number_of_pieces == 1 {
+        piece_length
+    } else {
+        length - (full_pieces_count as u64 * piece_length)
+    };
+
+    let is_last_piece = piece_num == indexes_of_pieces;
+
+    let current_piece_length = if is_last_piece {
+        last_piece_size
+    } else {
+        piece_length
+    };
+
+    let block_count = (current_piece_length as f32 / BLOCK_SIZE as f32).ceil() as usize;
+
+    trace!("bloc count: {block_count}");
+
+    let full_blocks = block_count - 1;
+
+    let last_block_size = (current_piece_length - (BLOCK_SIZE * full_blocks as u32) as u64) as u32;
+    trace!("last block size {last_block_size}");
+
+    BlocksInfo {
+        block_count,
+        last_block_size,
+    }
+}
+
+struct BlocksInfo {
+    block_count: usize,
+    last_block_size: u32,
 }
 
 #[allow(unused_variables)]
@@ -530,5 +558,35 @@ impl<'a> PeerConnected<'a> {
     pub fn connected_peer_id_hex(&self) -> String {
         let remote_peer_id: Bytes20 = self.remote_peer_id.into();
         hex::encode(remote_peer_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::assert_eq;
+
+    use crate::torrent::peer::BLOCK_SIZE;
+
+    use super::{calc_block_size, BlocksInfo};
+
+    #[test]
+    fn test_block_calc() {
+        let piece_num = 0;
+        let length = 820892;
+        let piece_length = 262144;
+        let number_of_pieces = 4;
+
+        let BlocksInfo {
+            block_count,
+            last_block_size,
+        } = calc_block_size(piece_num, length, piece_length, number_of_pieces);
+
+        dbg!(block_count);
+        dbg!(last_block_size);
+
+        assert_eq!(
+            piece_length as u32,
+            (block_count as u32 - 1) * BLOCK_SIZE + last_block_size
+        );
     }
 }
