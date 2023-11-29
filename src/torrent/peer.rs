@@ -364,7 +364,7 @@ impl<'a> PeerConnected<'a> {
         let received_msg = self.next_message().await?;
 
         let PeerMessage::Unchoke = received_msg else {
-            bail!("Expected type of message choke got {}", received_msg)
+            bail!("Expected type of message unchoke got {}", received_msg)
         };
 
         Ok(())
@@ -379,7 +379,6 @@ impl<'a> PeerConnected<'a> {
         Ok(())
     }
 
-    // TODO: Handle heartbeat spam
     #[instrument(skip(self))]
     async fn next_message(&mut self) -> Result<PeerMessage> {
         loop {
