@@ -359,7 +359,7 @@ impl<'a> PeerConnected<'a> {
 
         self.send_message(PeerMessage::Interested)
             .await
-            .context("Send choke")?;
+            .context("Send interested")?;
 
         let received_msg = self.next_message().await?;
 
