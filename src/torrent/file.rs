@@ -10,7 +10,7 @@ use std::writeln;
 use crate::bencode::{bytes_serialize, deserialize_hashes, deserialize_url};
 use crate::bencode::{from_bytes, to_bytes};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct TorrentMetadataInfo {
     #[serde(deserialize_with = "deserialize_url")]
     pub announce: Url,
@@ -57,7 +57,7 @@ impl std::fmt::Display for TorrentMetadataInfo {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct TorrentInfo {
     pub length: u64,
     pub name: String,

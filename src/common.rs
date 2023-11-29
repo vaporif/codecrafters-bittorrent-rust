@@ -9,7 +9,7 @@ impl WithInfoHash for [u8; 20] {
         *self
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct PeerId(Bytes20);
 
 impl From<Bytes20> for PeerId {
@@ -24,7 +24,7 @@ impl From<PeerId> for Bytes20 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct InfoHash(Bytes20);
 
 impl From<Bytes20> for InfoHash {

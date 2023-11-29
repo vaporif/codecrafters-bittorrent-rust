@@ -9,6 +9,7 @@ use rand::{distributions::Alphanumeric, Rng};
 pub use tracker::*;
 
 #[allow(unused)]
+#[derive(Debug)]
 pub struct Torrent {
     metadata: TorrentMetadataInfo,
     pieces: Vec<TorrentPiece>,
@@ -61,6 +62,7 @@ impl Torrent {
 }
 
 #[allow(unused)]
+#[derive(Debug)]
 struct TorrentPiece {
     hash: Bytes20,
 }

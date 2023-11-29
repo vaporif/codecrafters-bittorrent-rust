@@ -5,7 +5,7 @@ use clap::{arg, command, Parser, Subcommand};
 
 const DEFAULT_PORT: u16 = 6881;
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(author = "Dmytro Onypko", name = "Torrent Sample Client")]
 pub struct Cli {
     #[command(subcommand, name = "action")]
@@ -14,7 +14,7 @@ pub struct Cli {
     pub port: u16,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum Command {
     #[command(long_about = "Decode Bencode Value")]
     Decode {

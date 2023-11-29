@@ -13,9 +13,10 @@ mod torrent;
 #[tokio::main()]
 #[allow(unused)]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt::init();
+    debug!("Cli is {:?}", cli);
     match cli.command {
         Command::Decode { bencoded_value } => {
             let decoded: Value = from_str(bencoded_value)?;

@@ -55,6 +55,8 @@ impl std::fmt::Display for PeersResponse {
         Ok(())
     }
 }
+
+#[derive(Debug)]
 pub struct Tracker {
     url: Url,
     port: u16,
@@ -70,6 +72,7 @@ impl Tracker {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn peers(&self, torrent_metadata: &TorrentMetadataInfo) -> Result<PeersResponse> {
         let client = Client::new();
         let params = PeersRequest::new(torrent_metadata, self.peer_id, self.port);

@@ -216,7 +216,7 @@ impl Decoder for PeerProtocolFramer {
         &mut self,
         src: &mut bytes::BytesMut,
     ) -> std::result::Result<Option<Self::Item>, Self::Error> {
-        trace!("Decoding, buf len is {}", src.len());
+        trace!("buf len is {}", src.len());
 
         if src.len() < PEER_MESSAGE_LENGTH {
             return Ok(None);
@@ -234,7 +234,7 @@ impl Decoder for PeerProtocolFramer {
         }
 
         if src.len() < PEER_MESSAGE_LENGTH + 1 + length {
-            trace!("not enough data");
+            trace!("not enough data, re-running to query more");
             return Ok(None);
         }
 
@@ -247,7 +247,7 @@ impl Decoder for PeerProtocolFramer {
 
         let message_id = src[4];
         let message = PeerMessage::new(message_id, payload).context("Peer message parse")?;
-        trace!("{}", message);
+        trace!("message is {}", message);
         src.advance(4 + length);
         Ok(Some(message))
     }
