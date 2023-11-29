@@ -34,14 +34,14 @@ impl PeersRequest {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct PeersResponse {
     pub interval: u64,
     #[serde(deserialize_with = "deserialize_ips")]
     pub peers: Vec<SocketAddrV4>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct TrackerResponseFailure {
     #[serde(rename = "failure reason")]
     pub failure_reason: String,
@@ -88,6 +88,8 @@ impl Tracker {
         if is_success {
             let response: PeersResponse =
                 crate::from_bytes(&response_bytes).context("parse peers response")?;
+
+            trace!("Peers response got {:?}", response);
 
             Ok(response)
         } else {
