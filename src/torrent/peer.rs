@@ -1,4 +1,4 @@
-use std::{assert_eq, net::SocketAddrV4};
+use std::{assert_eq, net::SocketAddrV4, println};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -74,6 +74,7 @@ impl Handshake {
 
 #[repr(u8)]
 #[allow(dead_code)]
+#[derive(Debug)]
 enum PeerMessageId {
     Choke = 0,
     Unchoke = 1,
@@ -102,6 +103,7 @@ impl TryFrom<[u8; PEER_MESSAGE_LENGTH_WITH_ID]> for PeerMessage {
         value: [u8; PEER_MESSAGE_LENGTH_WITH_ID],
     ) -> std::result::Result<Self, Self::Error> {
         let message_id: PeerMessageId = value[4].try_into().context("try_into message_id")?;
+        dbg!(&message_id);
         let mut length = [0u8; 4];
         length.copy_from_slice(&value[0..4]);
 
@@ -119,18 +121,19 @@ impl PeerMessage {
             bail!("message already read")
         }
         let mut buffer = vec![0u8; self.length()];
-
+        println!("reading payload, legth is {}", self.length());
         stream
             .read_exact(&mut buffer)
             .await
             .context("reading payload of message")?;
 
+        println!("payload read");
         self.payload = Some(buffer.into_boxed_slice());
         Ok(())
     }
 
     fn length(&self) -> usize {
-        u32::from_be_bytes(self.length) as usize
+        u32::from_be_bytes(self.length) as usize - 1
     }
 }
 
@@ -218,8 +221,22 @@ impl PeerConnected {
             .read_exact(&mut buffer)
             .await
             .context("read next message legth+message_id")?;
+        println!("read message");
 
         let mut message: PeerMessage = buffer.try_into()?;
+        println!("message length {}", message.length());
+        match self.stream.peek(&mut buffer).await {
+            Ok(n) => {
+                if n > 0 {
+                    println!("has {n} bytes");
+                } else {
+                    println!("no bytes");
+                }
+            }
+            Err(e) => {
+                println!("{}", e);
+            }
+        }
 
         message
             .read_payload(&mut self.stream)
