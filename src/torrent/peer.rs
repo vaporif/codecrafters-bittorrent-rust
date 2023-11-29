@@ -236,7 +236,7 @@ impl Decoder for PeerProtocolFramer {
         let message_id = src[4];
         trace!("message_id is {message_id}");
 
-        if src.len() < PEER_MESSAGE_LENGTH + 1 + length {
+        if src.len() < PEER_MESSAGE_LENGTH + length {
             trace!("not enough data, re-running to query more");
             return Ok(None);
         }
@@ -349,16 +349,30 @@ impl<'a> PeerConnected<'a> {
             bail!("Expected type of message bitfield got {}", received_msg)
         };
 
-        self.stream
-            .send(PeerMessage::Choke)
+        self.send_message(PeerMessage::Interested)
             .await
-            .context("send choke")?;
+            .context("Send choke")?;
 
         let received_msg = self.next_message().await?;
 
         let PeerMessage::Choke = received_msg else {
             bail!("Expected type of message choke got {}", received_msg)
         };
+
+        let received_msg = self.next_message().await?;
+
+        let PeerMessage::Unchoke = received_msg else {
+            bail!("Expected type of message Unchoke got {}", received_msg)
+        };
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn send_message(&mut self, message: PeerMessage) -> Result<()> {
+        self.stream
+            .send(message)
+            .await
+            .context("peer message send")?;
         Ok(())
     }
 
@@ -372,7 +386,6 @@ impl<'a> PeerConnected<'a> {
                 .await
                 .context("stream read error")?
                 .context("message expected")?;
-            trace!("Message {}", message);
             if let PeerMessage::Heartbeat = message {
                 continue;
             }
