@@ -388,7 +388,14 @@ impl<'a> Peer<'a> {
 }
 
 impl TorrentInfo {
+    #[instrument(skip(self))]
     fn calc_blocks(&self, piece_num: usize) -> Vec<RequestBlock> {
+        trace!(
+            "length: {}, piece_length: {}, number of pieces: {}",
+            self.length,
+            self.piece_length,
+            self.pieces.len()
+        );
         // NOTE: 16 KB Big endian
         const BLOCK_SIZE: u32 = 16 * 1024;
         let num_of_pieces = self.pieces.len();
@@ -406,11 +413,22 @@ impl TorrentInfo {
             (self.piece_length as f32 / BLOCK_SIZE as f32).ceil() as usize
         };
 
+        trace!("bloc count: {block_count}");
+
+        let last_block_size =
+            (self.piece_length - (BLOCK_SIZE * (block_count as u32 - 1)) as u64) as u32;
+        trace!("last block size {last_block_size}");
+
         (0..block_count)
             .map(|index| {
                 let is_last_block = index == block_count - 1;
-                let begin = piece_num as u32 * BLOCK_SIZE;
-                RequestBlock::new(piece_num as u32, begin, BLOCK_SIZE)
+                let begin = index as u32 * BLOCK_SIZE;
+                let block_size = if is_last_block {
+                    last_block_size
+                } else {
+                    BLOCK_SIZE
+                };
+                RequestBlock::new(piece_num as u32, begin, block_size)
             })
             .collect()
     }
@@ -428,7 +446,7 @@ impl<'a> PeerConnected<'a> {
     }
 
     #[instrument(skip(self))]
-    pub async fn receive_file_piece(&mut self, piece_num: usize) -> Result<()> {
+    pub async fn receive_file_piece(&mut self, piece_num: usize) -> Result<Vec<u8>> {
         let piece_hash = self.get_piece_hash(piece_num)?;
         let received_msg = self.next_message().await?;
         let PeerMessage::Bitfield(_) = received_msg else {
@@ -467,7 +485,20 @@ impl<'a> PeerConnected<'a> {
             result.extend_from_slice(&piece_data.block);
         }
 
-        Ok(())
+        assert_eq!(
+            self.torrent_info.piece_length,
+            result.len() as u64,
+            "Piece length does not match"
+        );
+
+        let received_hash = sha1_hash(&result);
+
+        assert_eq!(
+            self.get_piece_hash(piece_num).context("get piece hash")?,
+            received_hash
+        );
+
+        Ok(result)
     }
 
     #[instrument(skip(self))]

@@ -13,7 +13,7 @@ mod torrent;
 #[tokio::main()]
 #[allow(unused)]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    // tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
     debug!("Cli is {:?}", cli);
@@ -52,6 +52,8 @@ async fn main() -> Result<()> {
             piece_number,
             output,
         } => {
+            std::env::set_var("RUST_LOG", "trace");
+            tracing_subscriber::fmt::init();
             let dir_path = std::path::Path::new(&output);
 
             let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
@@ -62,7 +64,9 @@ async fn main() -> Result<()> {
                     .await
                     .context("connecting to random peer")?;
 
-                peer.receive_file_piece(piece_number).await?;
+                let piece_data = peer.receive_file_piece(piece_number).await?;
+
+                std::fs::write(dir_path, piece_data).context("failed to save piece")?;
             } else {
                 bail!("No peers")
             }
