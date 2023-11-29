@@ -363,15 +363,10 @@ impl<'a> PeerConnected<'a> {
 
         let received_msg = self.next_message().await?;
 
-        let PeerMessage::Choke = received_msg else {
+        let PeerMessage::Unchoke = received_msg else {
             bail!("Expected type of message choke got {}", received_msg)
         };
 
-        let received_msg = self.next_message().await?;
-
-        let PeerMessage::Unchoke = received_msg else {
-            bail!("Expected type of message Unchoke got {}", received_msg)
-        };
         Ok(())
     }
 
