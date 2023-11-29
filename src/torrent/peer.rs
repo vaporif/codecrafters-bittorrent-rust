@@ -1,9 +1,12 @@
-use std::{assert_eq, net::SocketAddrV4, println};
+use std::{assert_eq, net::SocketAddrV4};
 
+use bytes::{Buf, BufMut};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
+use tokio_stream::StreamExt;
+use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use crate::prelude::*;
 
@@ -72,89 +75,118 @@ impl Handshake {
     }
 }
 
-#[repr(u8)]
 #[allow(dead_code)]
 #[derive(Debug)]
-enum PeerMessageId {
-    Choke = 0,
-    Unchoke = 1,
-    Interested = 2,
-    NotInterested = 3,
-    Have = 4,
-    Bitfield = 5,
-    Request = 6,
-    Piece = 7,
-    Cancel = 8,
-}
-
-#[allow(unused)]
-#[repr(C)]
-pub struct PeerMessage {
-    length: [u8; 4],
-    message_id: PeerMessageId,
-    payload: Option<Box<[u8]>>,
-}
-
-const PEER_MESSAGE_LENGTH_WITH_ID: usize = 4 + 1;
-
-impl TryFrom<[u8; PEER_MESSAGE_LENGTH_WITH_ID]> for PeerMessage {
-    type Error = anyhow::Error;
-    fn try_from(
-        value: [u8; PEER_MESSAGE_LENGTH_WITH_ID],
-    ) -> std::result::Result<Self, Self::Error> {
-        let message_id: PeerMessageId = value[4].try_into().context("try_into message_id")?;
-        dbg!(&message_id);
-        let mut length = [0u8; 4];
-        length.copy_from_slice(&value[0..4]);
-
-        Ok(Self {
-            length,
-            message_id,
-            payload: None,
-        })
-    }
+enum PeerMessage {
+    Choke,
+    Unchoke,
+    Interested,
+    NotInterested,
+    Have(u8),
+    Bitfield(Vec<u8>),
+    Request,
+    Piece,
+    Cancel,
 }
 
 impl PeerMessage {
-    async fn read_payload(&mut self, stream: &mut TcpStream) -> Result<()> {
-        if self.payload.is_some() {
-            bail!("message already read")
-        }
-        let mut buffer = vec![0u8; self.length()];
-        println!("reading payload, legth is {}", self.length());
-        stream
-            .read_exact(&mut buffer)
-            .await
-            .context("reading payload of message")?;
-
-        println!("payload read");
-        self.payload = Some(buffer.into_boxed_slice());
-        Ok(())
+    fn new(message_id: u8, payload: Option<Vec<u8>>) -> Result<PeerMessage> {
+        let message = match message_id {
+            0 => PeerMessage::Choke,
+            1 => PeerMessage::Unchoke,
+            2 => PeerMessage::Interested,
+            3 => PeerMessage::NotInterested,
+            4 => PeerMessage::Have(payload.unwrap()[0]),
+            5 => PeerMessage::Bitfield(payload.unwrap()),
+            6 => PeerMessage::Request,
+            7 => PeerMessage::Piece,
+            8 => PeerMessage::Cancel,
+            _ => bail!("Unknown message id {message_id}"),
+        };
+        Ok(message)
     }
 
-    fn length(&self) -> usize {
-        u32::from_be_bytes(self.length) as usize - 1
+    fn get_message_bytes(self) -> Vec<u8> {
+        match self {
+            PeerMessage::Have(byte) => vec![byte],
+            PeerMessage::Bitfield(vec) => vec,
+            _ => Vec::new(),
+        }
+    }
+
+    fn get_message_id(&self) -> u8 {
+        match self {
+            PeerMessage::Choke => 1,
+            PeerMessage::Unchoke => 2,
+            PeerMessage::Interested => 3,
+            PeerMessage::NotInterested => 4,
+            PeerMessage::Have(_) => 5,
+            PeerMessage::Bitfield(_) => 6,
+            PeerMessage::Request => 7,
+            PeerMessage::Piece => 8,
+            PeerMessage::Cancel => 9,
+        }
     }
 }
 
-impl TryFrom<u8> for PeerMessageId {
+struct PeerProtocolFramer;
+
+const PEER_MESSAGE_LENGTH: usize = 4;
+
+impl Decoder for PeerProtocolFramer {
+    type Item = PeerMessage;
+
     type Error = anyhow::Error;
 
-    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
-        let message_id = match value {
-            0 => Some(PeerMessageId::Choke),
-            1 => Some(PeerMessageId::Unchoke),
-            2 => Some(PeerMessageId::Interested),
-            3 => Some(PeerMessageId::NotInterested),
-            4 => Some(PeerMessageId::Have),
-            5 => Some(PeerMessageId::Bitfield),
-            6 => Some(PeerMessageId::Request),
-            7 => Some(PeerMessageId::Piece),
-            8 => Some(PeerMessageId::Cancel),
-            _ => None, // Return None if the value doesn't correspond to any variant
+    fn decode(
+        &mut self,
+        src: &mut bytes::BytesMut,
+    ) -> std::result::Result<Option<Self::Item>, Self::Error> {
+        if src.len() < PEER_MESSAGE_LENGTH {
+            return Ok(None);
+        }
+
+        let mut length = [0u8; 4];
+        length.copy_from_slice(&src[..PEER_MESSAGE_LENGTH]);
+
+        let length = u32::from_be_bytes(length) as usize;
+        // NOTE: heartbeat
+        if length == 0 {
+            src.advance(PEER_MESSAGE_LENGTH);
+        }
+
+        if src.len() < PEER_MESSAGE_LENGTH + 1 + length {
+            return Ok(None);
+        }
+
+        let payload = if src.len() > 5 {
+            Some(src[5..length + 4].to_vec())
+        } else {
+            None
         };
 
-        message_id.ok_or(anyhow!("Unsupported message_id {value}"))
+        let message_id = src[4];
+        let message = PeerMessage::new(message_id, payload).context("Peer message parse")?;
+        src.advance(4 + length);
+        Ok(Some(message))
+    }
+}
+impl Encoder<PeerMessage> for PeerProtocolFramer {
+    type Error = anyhow::Error;
+
+    fn encode(
+        &mut self,
+        item: PeerMessage,
+        dst: &mut bytes::BytesMut,
+    ) -> std::result::Result<(), Self::Error> {
+        let message_id = item.get_message_id();
+        let payload_bytes = item.get_message_bytes();
+        let length = (payload_bytes.len() + 1).to_be_bytes();
+        dst.extend_from_slice(&length);
+        dst.put_u8(message_id);
+        dst.extend_from_slice(&payload_bytes);
+
+        Ok(())
     }
 }
 
@@ -169,7 +201,7 @@ pub struct PeerConnected {
     socket_addr: SocketAddrV4,
     peer_id: PeerId,
     remote_peer_id: PeerId,
-    stream: TcpStream,
+    stream: Framed<TcpStream, PeerProtocolFramer>,
     torrent_info_hash: TorrentInfoHash,
 }
 
@@ -186,7 +218,7 @@ impl Peer {
         }
     }
 
-    pub async fn connect(&self) -> Result<PeerConnected> {
+    pub async fn connect(self) -> Result<PeerConnected> {
         let mut stream = TcpStream::connect(self.socket_addr)
             .await
             .context("establishing connection")?;
@@ -208,69 +240,24 @@ impl Peer {
             socket_addr: self.socket_addr,
             peer_id: self.peer_id,
             remote_peer_id: handshake.peer_id,
-            stream,
+            stream: Framed::new(stream, PeerProtocolFramer),
             torrent_info_hash: self.torrent_info_hash,
         })
     }
 }
 
 impl PeerConnected {
-    async fn fill_message(&mut self) -> Result<PeerMessage> {
-        let mut buffer = [0u8; PEER_MESSAGE_LENGTH_WITH_ID];
-        self.stream
-            .read_exact(&mut buffer)
-            .await
-            .context("read next message legth+message_id")?;
-        println!("read message");
-
-        let mut message: PeerMessage = buffer.try_into()?;
-        println!("message length {}", message.length());
-        match self.stream.peek(&mut buffer).await {
-            Ok(n) => {
-                if n > 0 {
-                    println!("has {n} bytes");
-                } else {
-                    println!("no bytes");
-                }
-            }
-            Err(e) => {
-                println!("{}", e);
-            }
-        }
-
-        message
-            .read_payload(&mut self.stream)
-            .await
-            .context("reading payload of message")?;
-
-        Ok(message)
-    }
-
     pub async fn receive_file(&mut self) -> Result<()> {
-        let message = self.fill_message().await?;
-        assert_eq!(PeerMessageId::Bitfield as u8, message.message_id as u8);
-
+        let bitfield = self
+            .stream
+            .next()
+            .await
+            .context("receiving new message")?
+            .context("receiving bitfield")?;
+        assert_eq!(5, bitfield.get_message_id());
         Ok(())
     }
-}
 
-impl From<PeerConnected> for Peer {
-    fn from(value: PeerConnected) -> Self {
-        let PeerConnected {
-            socket_addr,
-            peer_id,
-            torrent_info_hash,
-            ..
-        } = value;
-        Peer {
-            socket_addr,
-            peer_id,
-            torrent_info_hash,
-        }
-    }
-}
-
-impl PeerConnected {
     pub fn connected_peer_id_hex(&self) -> String {
         let remote_peer_id: Bytes20 = self.remote_peer_id.into();
         hex::encode(remote_peer_id)

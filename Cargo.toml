@@ -35,4 +35,6 @@ sha1 = "0.10.1"                                                    # hashing
 tempfile = "3"                                                     # creating temporary directories
 thiserror = "1.0.38"
 tokio = { version = "1.23.0", features = ["full"] }                # async http requests
+tokio-stream = "0.1.14"
+tokio-util = "0.7.10"
 urlencoding = "2.1.3"
