@@ -46,8 +46,8 @@ pub enum Command {
         #[arg(name = "peer ip with port", help = "<peer_ip>:<peer_port>")]
         peer: String,
     },
-    #[command(long_about = "Download piece")]
-    Download {
+    #[command(name = "download_piece", long_about = "Download piece")]
+    DownloadPiece {
         #[arg(name = "torrent path", help = "torrent path")]
         torrent_path: String,
         #[arg(name = "piece number")]

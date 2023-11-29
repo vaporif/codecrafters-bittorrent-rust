@@ -44,26 +44,22 @@ async fn main() -> Result<()> {
 
             println!("Peer ID: {}", peer.connected_peer_id_hex());
         }
-        Command::Download {
+        Command::DownloadPiece {
             torrent_path,
             piece_number,
             output,
         } => {
             let dir_path = std::path::Path::new(&output);
-            if !dir_path.exists() {
-                bail!("path not found");
-            }
-            if !dir_path.is_dir() {
-                bail!("is not a dir")
-            }
 
             let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
             let mut peers = torrent.get_peers().await?;
             if let Some(random_peer) = remove_random_element(&mut peers) {
-                let peer = random_peer
+                let mut peer = random_peer
                     .connect()
                     .await
                     .context("connecting to random peer")?;
+
+                peer.receive_file().await?;
             } else {
                 bail!("No peers")
             }

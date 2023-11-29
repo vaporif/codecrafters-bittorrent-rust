@@ -1,4 +1,4 @@
-use std::net::SocketAddrV4;
+use std::{assert_eq, net::SocketAddrV4};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -91,7 +91,68 @@ enum PeerMessageId {
 pub struct PeerMessage {
     length: [u8; 4],
     message_id: PeerMessageId,
-    payload: Vec<u8>,
+    payload: Option<Box<[u8]>>,
+}
+
+const PEER_MESSAGE_LENGTH_WITH_ID: usize = 4 + 1;
+
+impl TryFrom<[u8; PEER_MESSAGE_LENGTH_WITH_ID]> for PeerMessage {
+    type Error = anyhow::Error;
+    fn try_from(
+        value: [u8; PEER_MESSAGE_LENGTH_WITH_ID],
+    ) -> std::result::Result<Self, Self::Error> {
+        let message_id: PeerMessageId = value[4].try_into().context("try_into message_id")?;
+        let mut length = [0u8; 4];
+        length.copy_from_slice(&value[0..4]);
+
+        Ok(Self {
+            length,
+            message_id,
+            payload: None,
+        })
+    }
+}
+
+impl PeerMessage {
+    async fn read_payload(&mut self, stream: &mut TcpStream) -> Result<()> {
+        if self.payload.is_some() {
+            bail!("message already read")
+        }
+        let mut buffer = vec![0u8; self.length()];
+
+        stream
+            .read_exact(&mut buffer)
+            .await
+            .context("reading payload of message")?;
+
+        self.payload = Some(buffer.into_boxed_slice());
+        Ok(())
+    }
+
+    fn length(&self) -> usize {
+        u32::from_be_bytes(self.length) as usize
+    }
+}
+
+impl TryFrom<u8> for PeerMessageId {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        let message_id = match value {
+            0 => Some(PeerMessageId::Choke),
+            1 => Some(PeerMessageId::Unchoke),
+            2 => Some(PeerMessageId::Interested),
+            3 => Some(PeerMessageId::NotInterested),
+            4 => Some(PeerMessageId::Have),
+            5 => Some(PeerMessageId::Bitfield),
+            6 => Some(PeerMessageId::Request),
+            7 => Some(PeerMessageId::Piece),
+            8 => Some(PeerMessageId::Cancel),
+            _ => None, // Return None if the value doesn't correspond to any variant
+        };
+
+        message_id.ok_or(anyhow!("Unsupported message_id {value}"))
+    }
 }
 
 pub struct Peer {
@@ -147,6 +208,32 @@ impl Peer {
             stream,
             torrent_info_hash: self.torrent_info_hash,
         })
+    }
+}
+
+impl PeerConnected {
+    async fn fill_message(&mut self) -> Result<PeerMessage> {
+        let mut buffer = [0u8; PEER_MESSAGE_LENGTH_WITH_ID];
+        self.stream
+            .read_exact(&mut buffer)
+            .await
+            .context("read next message legth+message_id")?;
+
+        let mut message: PeerMessage = buffer.try_into()?;
+
+        message
+            .read_payload(&mut self.stream)
+            .await
+            .context("reading payload of message")?;
+
+        Ok(message)
+    }
+
+    pub async fn receive_file(&mut self) -> Result<()> {
+        let message = self.fill_message().await?;
+        assert_eq!(PeerMessageId::Bitfield as u8, message.message_id as u8);
+
+        Ok(())
     }
 }
 
