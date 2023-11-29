@@ -513,12 +513,6 @@ impl<'a> PeerConnected<'a> {
             result.extend_from_slice(&piece_data.block);
         }
 
-        assert_eq!(
-            self.torrent_info.piece_length,
-            result.len() as u64,
-            "Piece length does not match"
-        );
-
         let received_hash = sha1_hash(&result);
 
         assert_eq!(
