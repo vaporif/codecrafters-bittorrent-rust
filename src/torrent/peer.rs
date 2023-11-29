@@ -222,7 +222,7 @@ impl Decoder for PeerProtocolFramer {
             return Ok(None);
         }
 
-        let mut length = [0u8; 4];
+        let mut length = [0u8; PEER_MESSAGE_LENGTH];
         length.copy_from_slice(&src[..PEER_MESSAGE_LENGTH]);
 
         let length = u32::from_be_bytes(length) as usize;
@@ -242,13 +242,13 @@ impl Decoder for PeerProtocolFramer {
         }
 
         let payload = if src.len() > 5 {
-            Some(src[5..length + 4].to_vec())
+            Some(src[5..length + PEER_MESSAGE_LENGTH].to_vec())
         } else {
             None
         };
 
         let message = PeerMessage::new(message_id, payload).context("Peer message parse")?;
-        src.advance(4 + length);
+        src.advance(PEER_MESSAGE_LENGTH + length);
         Ok(Some(message))
     }
 }
@@ -388,6 +388,7 @@ impl<'a> PeerConnected<'a> {
                 .map(|m| m.context("stream closed")?)
                 .context("timeout")?
                 .context("message expected")?;
+            trace!("message is {:?}", message);
             if let PeerMessage::Heartbeat = message {
                 continue;
             }
