@@ -233,16 +233,17 @@ impl Decoder for PeerProtocolFramer {
             return Ok(Some(PeerMessage::Heartbeat));
         }
 
-        let message_id = src[4];
-        trace!("message_id is {message_id}");
-
         if src.len() < PEER_MESSAGE_LENGTH + length {
             trace!("not enough data, re-running to query more");
             return Ok(None);
         }
 
+        let data = &src[4..length + PEER_MESSAGE_LENGTH];
+
+        let message_id = data[0];
+        trace!("message_id is {message_id}");
         let payload = if src.len() > 5 {
-            Some(src[5..length + PEER_MESSAGE_LENGTH].to_vec())
+            Some(data[1..].to_vec())
         } else {
             None
         };
