@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{assert_eq, fmt::Debug, net::SocketAddrV4, time::Duration};
+use std::{assert_eq, fmt::Debug, format, net::SocketAddrV4, time::Duration};
 
 use bytes::{Buf, BufMut};
 use futures::{sink::SinkExt, StreamExt};
@@ -17,6 +17,7 @@ const BITTORRENT_PROTOCOL: &[u8; 19] = b"BitTorrent protocol";
 const BITTORRENT_PROTOCOL_LENGTH: u8 = BITTORRENT_PROTOCOL.len() as u8;
 const HANDSHAKE_MEM_SIZE: usize = std::mem::size_of::<Handshake>();
 
+// NOTE: using alignment to spice up things
 #[repr(C)]
 pub struct Handshake {
     pub length: u8,
@@ -102,6 +103,16 @@ struct RequestBlock {
     length: [u8; 4],
 }
 
+impl Debug for RequestBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RequestBlock")
+            .field("index", &self.index)
+            .field("begin", &self.begin)
+            .field("length", &self.length)
+            .finish()
+    }
+}
+
 impl RequestBlock {
     fn new(index: u32, begin: u32, length: u32) -> Self {
         RequestBlock {
@@ -116,16 +127,6 @@ impl RequestBlock {
             .into_iter()
             .flatten()
             .collect()
-    }
-}
-
-impl Debug for RequestBlock {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RequestBlock")
-            .field("index", &u32::from_be_bytes(self.index))
-            .field("begin", &u32::from_be_bytes(self.begin))
-            .field("length", &u32::from_be_bytes(self.length))
-            .finish()
     }
 }
 
@@ -152,13 +153,28 @@ impl From<&[u8]> for RequestBlock {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
 struct ReceivedBlock {
     index: [u8; 4],
     begin: [u8; 4],
     block: Vec<u8>,
 }
 
+impl Debug for ReceivedBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let binary_vec = self.block.iter().copied().take(20).collect::<Vec<_>>();
+        let binary_string = String::from_utf8_lossy(&binary_vec);
+        let block_binary_repr = format!(
+            "binary legth: {}, data(start): {}",
+            self.block.len(),
+            binary_string
+        );
+        f.debug_struct("RequestBlock")
+            .field("index", &u32::from_be_bytes(self.index))
+            .field("begin", &u32::from_be_bytes(self.begin))
+            .field("block", &block_binary_repr as &dyn Debug)
+            .finish()
+    }
+}
 impl From<&[u8]> for ReceivedBlock {
     fn from(value: &[u8]) -> Self {
         ReceivedBlock {
@@ -252,7 +268,6 @@ impl Decoder for PeerProtocolFramer {
     type Error = anyhow::Error;
 
     #[instrument(skip(self, src))]
-
     fn decode(
         &mut self,
         src: &mut bytes::BytesMut,
