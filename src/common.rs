@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use rand::Rng;
 use sha1::{Digest, Sha1};
 
@@ -25,29 +23,6 @@ impl From<Bytes20> for PeerId {
 
 impl From<PeerId> for Bytes20 {
     fn from(value: PeerId) -> Self {
-        value.0
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct InfoHash(Bytes20);
-
-impl Deref for InfoHash {
-    type Target = Bytes20;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<Bytes20> for InfoHash {
-    fn from(value: Bytes20) -> Self {
-        InfoHash(value)
-    }
-}
-
-impl From<InfoHash> for Bytes20 {
-    fn from(value: InfoHash) -> Self {
         value.0
     }
 }

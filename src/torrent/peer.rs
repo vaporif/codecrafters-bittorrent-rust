@@ -23,12 +23,12 @@ pub struct Handshake {
     pub length: u8,
     pub protocol: [u8; 19],
     pub reserved: [u8; 8],
-    pub info_hash: InfoHash,
+    pub info_hash: Bytes20,
     pub peer_id: PeerId,
 }
 
 impl Handshake {
-    pub fn new(info_hash: InfoHash, peer_id: PeerId) -> Self {
+    pub fn new(info_hash: Bytes20, peer_id: PeerId) -> Self {
         Self {
             length: BITTORRENT_PROTOCOL_LENGTH,
             protocol: BITTORRENT_PROTOCOL.to_owned(),
@@ -66,7 +66,7 @@ impl Handshake {
             info_hash: {
                 let mut info_hash = [0; 20];
                 info_hash.copy_from_slice(&data[28..48]);
-                info_hash.into()
+                info_hash
             },
             peer_id: {
                 let mut peer_id = [0; 20];
@@ -79,7 +79,7 @@ impl Handshake {
     }
 }
 
-type AvailablePieces = Vec<u8>;
+type PiecesIndexes = Vec<u8>;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -89,7 +89,7 @@ enum PeerMessage {
     Interested,
     NotInterested,
     Have(u8),
-    Bitfield(AvailablePieces),
+    Bitfield(PiecesIndexes),
     Request(RequestBlock),
     Piece(ReceivedBlock),
     Cancel,
@@ -340,65 +340,152 @@ impl Encoder<PeerMessage> for PeerProtocolFramer {
     }
 }
 
+#[allow(dead_code)]
 pub struct Peer<'a> {
-    socket_addr: SocketAddrV4,
-    peer_id: PeerId,
-    torrent_info_hash: InfoHash,
-    torrent_info: &'a TorrentInfo,
-}
-
-#[allow(unused)]
-pub struct PeerConnected<'a> {
-    socket_addr: SocketAddrV4,
-    peer_id: PeerId,
     remote_peer_id: PeerId,
-    stream: Framed<TcpStream, PeerProtocolFramer>,
-    torrent_info_hash: InfoHash,
+    stream: PeerTcpStream,
+    torrent_info_hash: Bytes20,
     torrent_info: &'a TorrentInfo,
+    available_pieces: Vec<u8>,
 }
 
 impl<'a> Peer<'a> {
-    pub fn from(
+    #[instrument]
+    pub async fn connect(
         socket_addr: SocketAddrV4,
         peer_id: PeerId,
-        torrent_info_hash: InfoHash,
+        torrent_info_hash: Bytes20,
         torrent_info: &'a TorrentInfo,
-    ) -> Peer {
-        Peer {
-            socket_addr,
-            peer_id,
-            torrent_info_hash,
-            torrent_info,
-        }
-    }
-
-    #[instrument(skip_all)]
-    pub async fn connect(self) -> Result<PeerConnected<'a>> {
-        let mut stream = TcpStream::connect(self.socket_addr)
+    ) -> Result<Peer<'a>> {
+        let mut stream = TcpStream::connect(socket_addr)
             .await
             .context("establishing connection")?;
-        let handshake = Handshake::new(self.torrent_info_hash, self.peer_id);
-        stream
-            .write_all(&handshake.serialize())
-            .await
-            .context("Send handshake")?;
+        let handshake = {
+            let handshake = Handshake::new(torrent_info_hash, peer_id);
+            stream
+                .write_all(&handshake.serialize())
+                .await
+                .context("Send handshake")?;
 
-        let mut buffer = [0u8; HANDSHAKE_MEM_SIZE];
-        stream
-            .read_exact(&mut buffer)
-            .await
-            .with_context(|| format!("Read only {} bytes", buffer.len()))?;
+            let mut buffer = [0u8; HANDSHAKE_MEM_SIZE];
+            stream
+                .read_exact(&mut buffer)
+                .await
+                .with_context(|| format!("Read only {} bytes", buffer.len()))?;
 
-        let handshake = Handshake::deserialize(buffer).context("deserialize handshake")?;
+            Handshake::deserialize(buffer).context("deserialize handshake")?
+        };
 
-        Ok(PeerConnected {
-            socket_addr: self.socket_addr,
-            peer_id: self.peer_id,
+        anyhow::ensure!(
+            &handshake.protocol == BITTORRENT_PROTOCOL,
+            "Incorrect protocol"
+        );
+
+        let mut stream = PeerTcpStream(Framed::new(stream, PeerProtocolFramer));
+
+        let received_msg = stream.next_message().await?;
+        let PeerMessage::Bitfield(available_pieces) = received_msg else {
+            bail!("Expected type of message bitfield got {}", received_msg)
+        };
+
+        Ok(Peer {
             remote_peer_id: handshake.peer_id,
-            stream: Framed::new(stream, PeerProtocolFramer),
-            torrent_info_hash: self.torrent_info_hash,
-            torrent_info: self.torrent_info,
+            stream,
+            torrent_info_hash,
+            torrent_info,
+            available_pieces,
         })
+    }
+
+    pub async fn connect_with_handshake_only(
+        socket_addr: SocketAddrV4,
+        peer_id: PeerId,
+        torrent_info_hash: Bytes20,
+    ) -> Result<PeerId> {
+        let mut stream = TcpStream::connect(socket_addr)
+            .await
+            .context("establishing connection")?;
+        let handshake = {
+            let handshake = Handshake::new(torrent_info_hash, peer_id);
+            stream
+                .write_all(&handshake.serialize())
+                .await
+                .context("Send handshake")?;
+
+            let mut buffer = [0u8; HANDSHAKE_MEM_SIZE];
+            stream
+                .read_exact(&mut buffer)
+                .await
+                .with_context(|| format!("Read only {} bytes", buffer.len()))?;
+
+            Handshake::deserialize(buffer).context("deserialize handshake")?
+        };
+
+        anyhow::ensure!(
+            &handshake.protocol == BITTORRENT_PROTOCOL,
+            "Incorrect protocol"
+        );
+
+        Ok(handshake.peer_id)
+    }
+
+    #[instrument(skip(self))]
+    fn get_piece_hash(&self, piece: usize) -> Result<&[u8]> {
+        self.torrent_info
+            .pieces
+            .get(piece)
+            .map(|f| f.as_slice())
+            .ok_or(anyhow!("Piece not found"))
+    }
+
+    #[instrument(skip(self))]
+    pub async fn receive_file_piece(&mut self, piece_num: usize) -> Result<Vec<u8>> {
+        // TODO: Check if piece exists
+        self.stream
+            .send_message(PeerMessage::Interested)
+            .await
+            .context("Send interested")?;
+
+        let received_msg = self.stream.next_message().await?;
+
+        let PeerMessage::Unchoke = received_msg else {
+            bail!("Expected type of message unchoke got {}", received_msg)
+        };
+
+        let blocks = self.torrent_info.calc_blocks(piece_num);
+
+        let blocks_len = blocks.len();
+        let mut result = Vec::new();
+
+        for (i, block) in blocks.into_iter().enumerate() {
+            trace!(
+                "Requesting piece {piece_num} via block num {}, number of blocks {}",
+                i + 1,
+                blocks_len
+            );
+            self.stream
+                .send_message(PeerMessage::Request(block))
+                .await
+                .context("send interested {i}")?;
+
+            let received_msg = self.stream.next_message().await?;
+
+            let PeerMessage::Piece(piece_data) = received_msg else {
+                bail!("Expected type of message unchoke got {}", received_msg)
+            };
+
+            assert_eq!(u32::from_be_bytes(piece_data.index), piece_num as u32);
+
+            result.extend_from_slice(&piece_data.block);
+        }
+
+        let received_hash = sha1_hash(&result);
+
+        let piece_hash = self.get_piece_hash(piece_num).context("get piece hash")?;
+
+        anyhow::ensure!(piece_hash == received_hash, "Hash incorrect");
+
+        Ok(result)
     }
 }
 
@@ -477,80 +564,12 @@ struct BlocksInfo {
     last_block_size: u32,
 }
 
-#[allow(unused_variables)]
-impl<'a> PeerConnected<'a> {
-    #[instrument(skip(self))]
-    fn get_piece_hash(&self, piece: usize) -> Result<&[u8]> {
-        self.torrent_info
-            .pieces
-            .get(piece)
-            .map(|f| f.as_slice())
-            .ok_or(anyhow!("Piece not found"))
-    }
-
-    #[instrument(skip(self))]
-    pub async fn receive_file_piece(&mut self, piece_num: usize) -> Result<Vec<u8>> {
-        let piece_hash = self.get_piece_hash(piece_num)?;
-        let received_msg = self.next_message().await?;
-        let PeerMessage::Bitfield(_) = received_msg else {
-            bail!("Expected type of message bitfield got {}", received_msg)
-        };
-
-        // TODO: Check if piece exists
-        self.send_message(PeerMessage::Interested)
-            .await
-            .context("Send interested")?;
-
-        let received_msg = self.next_message().await?;
-
-        let PeerMessage::Unchoke = received_msg else {
-            bail!("Expected type of message unchoke got {}", received_msg)
-        };
-
-        let blocks = self.torrent_info.calc_blocks(piece_num);
-
-        let mut result = Vec::new();
-
-        for (i, block) in blocks.into_iter().enumerate() {
-            trace!("Requesting piece {piece_num} via block num {i}");
-            self.send_message(PeerMessage::Request(block))
-                .await
-                .context("send interested {i}")?;
-
-            let received_msg = self.next_message().await?;
-
-            let PeerMessage::Piece(piece_data) = received_msg else {
-                bail!("Expected type of message unchoke got {}", received_msg)
-            };
-
-            assert_eq!(u32::from_be_bytes(piece_data.index), piece_num as u32);
-
-            result.extend_from_slice(&piece_data.block);
-        }
-
-        let received_hash = sha1_hash(&result);
-
-        assert_eq!(
-            self.get_piece_hash(piece_num).context("get piece hash")?,
-            received_hash
-        );
-
-        Ok(result)
-    }
-
-    #[instrument(skip(self))]
-    async fn send_message(&mut self, message: PeerMessage) -> Result<()> {
-        self.stream
-            .send(message)
-            .await
-            .context("peer message send")?;
-        Ok(())
-    }
-
+struct PeerTcpStream(Framed<TcpStream, PeerProtocolFramer>);
+impl PeerTcpStream {
     #[instrument(skip(self))]
     async fn next_message(&mut self) -> Result<PeerMessage> {
         loop {
-            let message = tokio::time::timeout(Duration::from_secs(5), self.stream.next())
+            let message = tokio::time::timeout(Duration::from_secs(5), self.0.next())
                 .await
                 .map(|m| m.context("stream closed")?)
                 .context("timeout")?
@@ -564,9 +583,10 @@ impl<'a> PeerConnected<'a> {
         }
     }
 
-    pub fn connected_peer_id_hex(&self) -> String {
-        let remote_peer_id: Bytes20 = self.remote_peer_id.into();
-        hex::encode(remote_peer_id)
+    #[instrument(skip(self))]
+    async fn send_message(&mut self, message: PeerMessage) -> Result<()> {
+        self.0.send(message).await.context("peer message send")?;
+        Ok(())
     }
 }
 

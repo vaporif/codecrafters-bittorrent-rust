@@ -37,12 +37,13 @@ async fn main() -> Result<()> {
             let peer = pares_peer_arg(&peer).context("parsing peer param")?;
             let metadata = TorrentMetadataInfo::from_file(torrent_path)?;
             let peer_id = generate_peer_id();
-            let peer = Peer::from(peer, peer_id, metadata.info_hash.into(), &metadata.info)
-                .connect()
+            let peer_id = Peer::connect_with_handshake_only(peer, peer_id, metadata.info_hash)
                 .await
                 .context("connecting to peer")?;
 
-            println!("Peer ID: {}", peer.connected_peer_id_hex());
+            let remote_peer_id: Bytes20 = peer_id.into();
+            let remote_peer_id = hex::encode(remote_peer_id);
+            println!("Peer ID: {}", remote_peer_id);
         }
         Command::DownloadPiece {
             torrent_path,
@@ -52,12 +53,17 @@ async fn main() -> Result<()> {
             let dir_path = std::path::Path::new(&output);
 
             let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
-            let mut peers = torrent.get_peers().await?;
+            let mut peers = torrent.get_peers_addresses().await?;
             if let Some(random_peer) = remove_random_element(&mut peers) {
-                let mut peer = random_peer
-                    .connect()
-                    .await
-                    .context("connecting to random peer")?;
+                let peer_id = generate_peer_id();
+                let mut peer = Peer::connect(
+                    random_peer,
+                    peer_id,
+                    torrent.metadata.info_hash,
+                    &torrent.metadata.info,
+                )
+                .await
+                .context("connecting to peer")?;
 
                 let piece_data = peer.receive_file_piece(piece_number).await?;
 

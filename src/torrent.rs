@@ -2,7 +2,7 @@ mod file;
 mod peer;
 mod tracker;
 
-use std::path::PathBuf;
+use std::{net::SocketAddrV4, path::PathBuf};
 
 use crate::prelude::*;
 pub use file::*;
@@ -13,7 +13,7 @@ pub use tracker::*;
 #[allow(unused)]
 #[derive(Debug)]
 pub struct Torrent {
-    metadata: TorrentMetadataInfo,
+    pub metadata: TorrentMetadataInfo,
     pieces: Vec<TorrentPiece>,
     peer_id: PeerId,
     tracker: Tracker,
@@ -38,15 +38,18 @@ impl Torrent {
     }
 
     pub async fn download(&self, output: PathBuf) -> Result<()> {
-        let mut peers = self.get_peers().await?;
+        let mut peers = self.get_peers_addresses().await?;
         if let Some(random_peer) = remove_random_element(&mut peers) {
-            let mut peer = random_peer
-                .connect()
-                .await
-                .context("connecting to random peer")?;
-
             let mut file_bytes = Vec::with_capacity(self.metadata.info.length as usize);
             for (piece_number, _) in self.metadata.info.pieces.iter().enumerate() {
+                let mut peer = Peer::connect(
+                    random_peer,
+                    self.peer_id,
+                    self.metadata.info_hash,
+                    &self.metadata.info,
+                )
+                .await
+                .context("failed to connect to peer")?;
                 let piece_data = peer.receive_file_piece(piece_number).await?;
                 file_bytes.extend_from_slice(&piece_data);
             }
@@ -68,22 +71,9 @@ impl Torrent {
             .context("getting peers")
     }
 
-    pub async fn get_peers(&self) -> Result<Vec<Peer>> {
+    pub async fn get_peers_addresses(&self) -> Result<Vec<SocketAddrV4>> {
         let peer_response = self.get_peers_tracker_response().await?;
-        let peers: Vec<_> = peer_response
-            .peers
-            .into_iter()
-            .map(|socket_addr| {
-                Peer::from(
-                    socket_addr,
-                    self.peer_id,
-                    self.metadata.info_hash.into(),
-                    &self.metadata.info,
-                )
-            })
-            .collect();
-
-        Ok(peers)
+        Ok(peer_response.peers)
     }
 }
 
