@@ -1,6 +1,7 @@
 use core::fmt;
 use std::{assert_eq, fmt::Debug, format, net::SocketAddrV4, time::Duration};
 
+use bitvec::{order::Msb0, vec::BitVec, view::AsBits};
 use bytes::{Buf, BufMut};
 use futures::{sink::SinkExt, StreamExt};
 use tokio::{
@@ -346,7 +347,7 @@ pub struct Peer<'a> {
     stream: PeerTcpStream,
     torrent_info_hash: Bytes20,
     torrent_info: &'a TorrentInfo,
-    bitfield: Vec<u8>,
+    bitfield: bitvec::vec::BitVec<u8, Msb0>,
 }
 
 impl<'a> Peer<'a> {
@@ -384,9 +385,11 @@ impl<'a> Peer<'a> {
         let mut stream = PeerTcpStream(Framed::new(stream, PeerProtocolFramer));
 
         let received_msg = stream.next_message().await?;
-        let PeerMessage::Bitfield(bitfield) = received_msg else {
+        let PeerMessage::Bitfield(bitfield_bytes) = received_msg else {
             bail!("Expected type of message bitfield got {}", received_msg)
         };
+
+        let bitfield = BitVec::<_, Msb0>::from_vec(bitfield_bytes);
 
         Ok(Peer {
             remote_peer_id: handshake.peer_id,
@@ -430,8 +433,8 @@ impl<'a> Peer<'a> {
     }
 
     #[instrument(skip(self))]
-    pub fn pieces(&self) -> Vec<bool> {
-        todo!()
+    pub fn has_piece(&self, piece: usize) -> bool {
+        *self.bitfield.get(piece - 1).as_deref().unwrap_or(&false)
     }
 
     #[instrument(skip(self))]
