@@ -346,7 +346,7 @@ pub struct Peer<'a> {
     stream: PeerTcpStream,
     torrent_info_hash: Bytes20,
     torrent_info: &'a TorrentInfo,
-    available_pieces: Vec<u8>,
+    bitfield: Vec<u8>,
 }
 
 impl<'a> Peer<'a> {
@@ -384,7 +384,7 @@ impl<'a> Peer<'a> {
         let mut stream = PeerTcpStream(Framed::new(stream, PeerProtocolFramer));
 
         let received_msg = stream.next_message().await?;
-        let PeerMessage::Bitfield(available_pieces) = received_msg else {
+        let PeerMessage::Bitfield(bitfield) = received_msg else {
             bail!("Expected type of message bitfield got {}", received_msg)
         };
 
@@ -393,7 +393,7 @@ impl<'a> Peer<'a> {
             stream,
             torrent_info_hash,
             torrent_info,
-            available_pieces,
+            bitfield,
         })
     }
 
@@ -427,6 +427,11 @@ impl<'a> Peer<'a> {
         );
 
         Ok(handshake.peer_id)
+    }
+
+    #[instrument(skip(self))]
+    pub fn pieces(&self) -> Vec<bool> {
+        todo!()
     }
 
     #[instrument(skip(self))]
