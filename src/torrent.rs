@@ -76,11 +76,10 @@ impl Torrent {
         Ok(peers_connected)
     }
 
-    pub async fn download(&self, output: PathBuf) -> Result<()> {
-        let mut peers = self.get_peers(5).await?;
-
-        // NOTE: simplify
-        let pieces = peers
+    // NOTE: well, just passing peers to piece
+    // to filter peers with pieces would have been easier
+    fn get_pieces(&self, peers: &[Peer<'_>]) -> Vec<Piece> {
+        peers
             .iter()
             .flat_map(|f| {
                 f.available_pieces()
@@ -95,11 +94,17 @@ impl Torrent {
                 },
             )
             .into_iter()
-            .filter_map(|(k, v)| Piece::new(k, &self.metadata.info, v).ok());
+            .filter_map(|(k, v)| Piece::new(k, &self.metadata.info, v).ok())
+            .collect()
+    }
+
+    pub async fn download(&self, output: PathBuf) -> Result<()> {
+        let mut peers = self.get_peers(5).await?;
+        let pieces = self.get_pieces(&peers);
 
         let mut heap = BinaryHeap::new();
 
-        for piece in pieces.filter(|f| f.has_peers()) {
+        for piece in pieces.into_iter().filter(|f| f.has_peers()) {
             heap.push(Reverse(piece));
         }
 
