@@ -6,6 +6,7 @@ use crate::{prelude::*, torrent::*};
 mod bencode;
 mod cli;
 mod common;
+
 mod prelude;
 mod torrent;
 

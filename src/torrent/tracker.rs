@@ -4,6 +4,7 @@ use reqwest::Client;
 use reqwest::Url;
 use serde::Deserialize;
 use std::net::SocketAddrV4;
+use std::usize;
 
 use super::TorrentMetadataInfo;
 
@@ -14,7 +15,7 @@ struct PeersRequest {
     #[serde(serialize_with = "bytes_lossy_string_serialize")]
     pub peer_id: Bytes20,
     pub port: u16,
-    pub left: u64,
+    pub left: usize,
     pub uploaded: u64,
     pub downloaded: u64,
     pub compact: u8,

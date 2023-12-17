@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{assert_eq, fmt::Debug, format, net::SocketAddrV4, time::Duration};
 
-use bitvec::{order::Msb0, vec::BitVec, view::AsBits};
+use bitvec::{order::Msb0, vec::BitVec};
 use bytes::{Buf, BufMut};
 use futures::{sink::SinkExt, StreamExt};
 use tokio::{
@@ -298,6 +298,7 @@ impl Decoder for PeerProtocolFramer {
         let data = &src[4..length + PEER_MESSAGE_LENGTH];
 
         let message_id = data[0];
+
         trace!("message_id is {message_id}");
         let payload = if src.len() > 5 {
             Some(data[1..].to_vec())
@@ -343,11 +344,25 @@ impl Encoder<PeerMessage> for PeerProtocolFramer {
 
 #[allow(dead_code)]
 pub struct Peer<'a> {
+    socket_addr: SocketAddrV4,
     remote_peer_id: PeerId,
     stream: PeerTcpStream,
     torrent_info_hash: Bytes20,
     torrent_info: &'a TorrentInfo,
     bitfield: bitvec::vec::BitVec<u8, Msb0>,
+    chocked: bool,
+}
+
+impl Debug for Peer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Peer")
+            .field("socket_addr", &self.socket_addr)
+            .field("remote_peer_id", &self.remote_peer_id)
+            .field("torrent_info_hash", &self.torrent_info_hash)
+            .field("torrent_info", &self.torrent_info)
+            .field("bitfield", &self.bitfield)
+            .finish()
+    }
 }
 
 impl<'a> Peer<'a> {
@@ -392,11 +407,13 @@ impl<'a> Peer<'a> {
         let bitfield = BitVec::<_, Msb0>::from_vec(bitfield_bytes);
 
         Ok(Peer {
+            socket_addr,
             remote_peer_id: handshake.peer_id,
             stream,
             torrent_info_hash,
             torrent_info,
             bitfield,
+            chocked: true,
         })
     }
 
@@ -434,7 +451,17 @@ impl<'a> Peer<'a> {
 
     #[instrument(skip(self))]
     pub fn has_piece(&self, piece: usize) -> bool {
-        *self.bitfield.get(piece - 1).as_deref().unwrap_or(&false)
+        *self.bitfield.get(piece).as_deref().unwrap_or(&false)
+    }
+
+    pub fn available_pieces(&self) -> Vec<usize> {
+        (0..=self.torrent_info.pieces.len())
+            .filter(|piece_number| self.has_piece(*piece_number))
+            .collect()
+    }
+
+    pub fn socket_addr(&self) -> SocketAddrV4 {
+        self.socket_addr
     }
 
     #[instrument(skip(self))]
@@ -448,17 +475,20 @@ impl<'a> Peer<'a> {
 
     #[instrument(skip(self))]
     pub async fn receive_file_piece(&mut self, piece_num: usize) -> Result<Vec<u8>> {
-        // TODO: Check if piece exists
-        self.stream
-            .send_message(PeerMessage::Interested)
-            .await
-            .context("Send interested")?;
+        if self.chocked {
+            self.stream
+                .send_message(PeerMessage::Interested)
+                .await
+                .context("Send interested")?;
 
-        let received_msg = self.stream.next_message().await?;
+            let received_msg = self.stream.next_message().await?;
 
-        let PeerMessage::Unchoke = received_msg else {
-            bail!("Expected type of message unchoke got {}", received_msg)
-        };
+            let PeerMessage::Unchoke = received_msg else {
+                bail!("Expected type of message unchoke got {}", received_msg)
+            };
+        }
+
+        self.chocked = false;
 
         let blocks = self.torrent_info.calc_blocks(piece_num);
 
@@ -468,13 +498,13 @@ impl<'a> Peer<'a> {
         for (i, block) in blocks.into_iter().enumerate() {
             trace!(
                 "Requesting piece {piece_num} via block num {}, number of blocks {}",
-                i + 1,
+                i,
                 blocks_len
             );
             self.stream
                 .send_message(PeerMessage::Request(block))
                 .await
-                .context("send interested {i}")?;
+                .context("request block {i}")?;
 
             let received_msg = self.stream.next_message().await?;
 
@@ -532,8 +562,8 @@ impl TorrentInfo {
 
 fn calc_block_size(
     piece_num: usize,
-    length: u64,
-    piece_length: u64,
+    length: usize,
+    piece_length: usize,
     number_of_pieces: usize,
 ) -> BlocksInfo {
     let indexes_of_pieces = number_of_pieces - 1;
@@ -541,7 +571,7 @@ fn calc_block_size(
     let last_piece_size = if number_of_pieces == 1 {
         piece_length
     } else {
-        length - (full_pieces_count as u64 * piece_length)
+        length - (full_pieces_count * piece_length)
     };
 
     let is_last_piece = piece_num == indexes_of_pieces;
@@ -558,7 +588,7 @@ fn calc_block_size(
 
     let full_blocks = block_count - 1;
 
-    let last_block_size = (current_piece_length - (BLOCK_SIZE * full_blocks as u32) as u64) as u32;
+    let last_block_size: u32 = current_piece_length as u32 - BLOCK_SIZE * full_blocks as u32;
     trace!("last block size {last_block_size}");
 
     BlocksInfo {
@@ -580,7 +610,7 @@ impl PeerTcpStream {
             let message = tokio::time::timeout(Duration::from_secs(5), self.0.next())
                 .await
                 .map(|m| m.context("stream closed")?)
-                .context("timeout")?
+                .context(format!("timeout at {}", line!()))?
                 .context("message expected")?;
             trace!("message is {:?}", message);
             if let PeerMessage::Heartbeat = message {
