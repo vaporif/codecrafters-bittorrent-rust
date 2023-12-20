@@ -105,25 +105,16 @@ impl Torrent {
             .collect()
     }
 
-    #[instrument(skip(self, peers, saved_block, output))]
+    #[instrument(skip(self, peers, saved_block, save_file_piece))]
     async fn cooperative_download_piece<T: Future<Output = Result<PeerId>>>(
         &self,
         piece_index: usize,
         piece_length: usize,
         peers: &mut FuturesUnordered<T>,
         saved_block: async_channel::Receiver<ReceivedBlock>,
-        output: &PathBuf,
+        save_file_piece: tokio::sync::mpsc::Sender<(u64, Vec<u8>)>,
     ) -> Result<()> {
         let average_piece_length = self.metadata.info.piece_length;
-
-        // let mut clone = saved_block.clone();
-        // tokio::task::spawn_blocking(move || loop {
-        //     let e = clone.recv_blocking();
-        //     trace!(
-        //         "-----------------------------------------------------------{:?}",
-        //         e
-        //     );
-        // });
 
         let mut bytes_written = 0;
         let mut piece_blocks = vec![0u8; piece_length];
@@ -153,7 +144,7 @@ impl Torrent {
 
                             bytes_written += block.data().len();
                             if bytes_written == piece_length {
-                                // tx.send(piece_blocks).await.expect("sent");
+                                save_file_piece.send(((piece_index * average_piece_length) as u64, piece_blocks)).await.expect("sent");
                                 break;
                             }
                         },
@@ -166,40 +157,49 @@ impl Torrent {
             }
         }
 
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(output)
-            .context("opening file")?;
-        file.set_len(self.metadata.info.length as u64)
-            .context("setting file size")?;
-        file.seek(SeekFrom::Start((piece_index * average_piece_length) as u64))
-            .context("seeking file")?;
-        file.write_all(&piece_blocks).context("writing file")?;
-
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    pub async fn download(&mut self, output: PathBuf) -> Result<()> {
         // let mut file = OpenOptions::new()
         //     .read(true)
         //     .write(true)
         //     .create(true)
         //     .open(output)
         //     .context("opening file")?;
-        // let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(piece_length);
-        // let file_handle = tokio::task::spawn_blocking(move || -> Result<()> {
-        //     loop {
-        //         while let Some(piece) = rx.blocking_recv() {
-        //             file.seek(SeekFrom::Start((piece_index * average_piece_length) as u64))
-        //                 .context("seeking file")?;
-        //             file.write_all(&piece).context("writing file")?;
-        //         }
-        //         break Ok(());
-        //     }
-        // });
+        // file.set_len(self.metadata.info.length as u64)
+        //     .context("setting file size")?;
+        // file.seek(SeekFrom::Start((piece_index * average_piece_length) as u64))
+        //     .context("seeking file")?;
+        // file.write_all(&piece_blocks).context("writing file")?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub async fn download(&mut self, output: PathBuf) -> Result<()> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(output)
+            .context("opening file")?;
+
+        file.set_len(self.metadata.info.length as u64)
+            .context("setting file size")?;
+        let (send_file_piece, mut receive_file_piece) =
+            tokio::sync::mpsc::channel::<(u64, Vec<u8>)>(self.metadata.info.pieces.len() / 2);
+        let num_pieces = self.metadata.info.pieces.len();
+        let file_handle = tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut num_pieces_saved = 0;
+            while let Some((index, data)) = receive_file_piece.blocking_recv() {
+                trace!("saving {}", index);
+                file.seek(SeekFrom::Start(index)).context("seeking file")?;
+                file.write_all(&data).context("writing file")?;
+                trace!("saved");
+                num_pieces_saved += 1;
+                if num_pieces_saved == num_pieces {
+                    break;
+                }
+            }
+            Ok(())
+        });
 
         let mut peers = self.get_peers(self.max_peers).await?;
         let pieces = self.get_pieces(&peers);
@@ -236,16 +236,20 @@ impl Torrent {
 
             trace!("futures created");
 
+            let send_file_piece = send_file_piece.clone();
+
             self.cooperative_download_piece(
                 piece.piece_index(),
                 total_piece_size,
                 &mut peers_interacting,
                 saved_block,
-                &output,
+                send_file_piece,
             )
             .await
             .context("saving file")?;
         }
+
+        file_handle.await.context("savig file")??;
 
         Ok(())
     }
