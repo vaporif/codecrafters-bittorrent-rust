@@ -7,6 +7,7 @@ use crate::prelude::*;
 use clap::{arg, command, Parser, Subcommand};
 
 const DEFAULT_PORT: u16 = 6881;
+const DEFAULT_MAX_PEERS: u8 = 10;
 
 #[derive(Parser, Debug)]
 #[command(author = "Dmytro Onypko", name = "Torrent Sample Client")]
@@ -15,6 +16,8 @@ pub struct Cli {
     pub command: Command,
     #[arg(short, long, default_value_t = DEFAULT_PORT)]
     pub port: u16,
+    #[arg(short, long, default_value_t = DEFAULT_MAX_PEERS)]
+    pub max_peers: u8,
 }
 
 #[derive(Subcommand, Debug)]

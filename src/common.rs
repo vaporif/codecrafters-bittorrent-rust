@@ -3,6 +3,8 @@ use sha1::{Digest, Sha1};
 
 use crate::prelude::*;
 
+pub const BLOCK_SIZE: u32 = 16 * 1024;
+
 pub trait WithInfoHash {
     fn info_hash(&self) -> Bytes20;
 }

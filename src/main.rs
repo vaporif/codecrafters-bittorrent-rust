@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bencode::*;
 use clap::Parser;
 use cli::{pares_peer_arg, Cli, Command};
@@ -30,7 +32,8 @@ async fn main() -> Result<()> {
             println!("{}", value);
         }
         Command::Peers { torrent_path } => {
-            let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
+            let torrent = Torrent::from_file(torrent_path, cli.port, cli.max_peers)
+                .context("loading torrent")?;
             let peers = torrent.get_peers_tracker_response().await?;
             println!("{}", peers);
         }
@@ -53,8 +56,11 @@ async fn main() -> Result<()> {
         } => {
             let dir_path = std::path::Path::new(&output);
 
-            let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
+            let torrent = Torrent::from_file(torrent_path, cli.port, cli.max_peers)
+                .context("loading torrent")?;
             let mut peers = torrent.get_peers_addresses().await?;
+            // nvm, hacking this in post download refactoring
+            let peer_hash_sets: HashSet<_> = peers.iter().copied().collect();
             if let Some(random_peer) = remove_random_element(&mut peers) {
                 let peer_id = generate_peer_id();
                 let mut peer = Peer::connect(
@@ -66,7 +72,15 @@ async fn main() -> Result<()> {
                 .await
                 .context("connecting to peer")?;
 
-                let piece_data = peer.receive_file_piece(piece_number).await?;
+                let piece = Piece::new(piece_number, &torrent.metadata.info, peer_hash_sets)
+                    .context("piece construction")?;
+
+                let piece_data = peer
+                    .receive_file_piece(
+                        piece_number,
+                        piece.piece_blocks(BLOCK_SIZE, &torrent.metadata.info),
+                    )
+                    .await?;
 
                 std::fs::write(dir_path, piece_data).context("failed to save piece")?;
             } else {
@@ -79,7 +93,8 @@ async fn main() -> Result<()> {
         } => {
             let dir_path = std::path::Path::new(&output);
 
-            let torrent = Torrent::from_file(torrent_path, cli.port).context("loading torrent")?;
+            let mut torrent = Torrent::from_file(torrent_path, cli.port, cli.max_peers)
+                .context("loading torrent")?;
             torrent.download(output).await?;
         }
     }

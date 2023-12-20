@@ -1,6 +1,7 @@
 use core::fmt;
 use std::{assert_eq, fmt::Debug, format, net::SocketAddrV4, time::Duration};
 
+use async_channel::{Receiver, Sender};
 use bitvec::{order::Msb0, vec::BitVec};
 use bytes::{Buf, BufMut};
 use futures::{sink::SinkExt, StreamExt};
@@ -12,7 +13,7 @@ use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use crate::prelude::*;
 
-use super::TorrentInfo;
+use super::{piece::PieceBlock, TorrentInfo};
 
 const BITTORRENT_PROTOCOL: &[u8; 19] = b"BitTorrent protocol";
 const BITTORRENT_PROTOCOL_LENGTH: u8 = BITTORRENT_PROTOCOL.len() as u8;
@@ -97,6 +98,12 @@ enum PeerMessage {
     Heartbeat,
 }
 
+impl From<PieceBlock> for RequestBlock {
+    fn from(val: PieceBlock) -> Self {
+        RequestBlock::new(val.piece_index, val.block_offset, val.block_size)
+    }
+}
+
 #[allow(dead_code)]
 struct RequestBlock {
     index: [u8; 4],
@@ -154,7 +161,7 @@ impl From<&[u8]> for RequestBlock {
 }
 
 #[allow(dead_code)]
-struct ReceivedBlock {
+pub struct ReceivedBlock {
     index: [u8; 4],
     begin: [u8; 4],
     block: Vec<u8>,
@@ -205,6 +212,14 @@ impl ReceivedBlock {
         .flatten()
         .copied()
         .collect()
+    }
+
+    pub fn index(&self) -> u32 {
+        u32::from_be_bytes(self.index)
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.block
     }
 }
 
@@ -357,10 +372,6 @@ impl Debug for Peer<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Peer")
             .field("socket_addr", &self.socket_addr)
-            .field("remote_peer_id", &self.remote_peer_id)
-            .field("torrent_info_hash", &self.torrent_info_hash)
-            .field("torrent_info", &self.torrent_info)
-            .field("bitfield", &self.bitfield)
             .finish()
     }
 }
@@ -473,8 +484,13 @@ impl<'a> Peer<'a> {
             .ok_or(anyhow!("Piece not found"))
     }
 
-    #[instrument(skip(self))]
-    pub async fn receive_file_piece(&mut self, piece_num: usize) -> Result<Vec<u8>> {
+    #[instrument(skip(self, requested_block, save_block), fields(self.socket_addr = %self.socket_addr))]
+    pub async fn process(
+        &mut self,
+        _: Sender<PieceBlock>,
+        requested_block: Receiver<PieceBlock>,
+        save_block: Sender<ReceivedBlock>,
+    ) -> Result<PeerId> {
         if self.chocked {
             self.stream
                 .send_message(PeerMessage::Interested)
@@ -490,19 +506,66 @@ impl<'a> Peer<'a> {
 
         self.chocked = false;
 
-        let blocks = self.torrent_info.calc_blocks(piece_num);
+        while let Ok(block) = requested_block.recv().await {
+            trace!("received to process {}", block.piece_index,);
+            let piece_index = block.piece_index;
+            let request_block = PeerMessage::Request(block.into());
+            self.stream
+                .send_message(request_block)
+                .await
+                .context("sending request message")?;
 
-        let blocks_len = blocks.len();
+            let received_msg = self.stream.next_message().await?;
+
+            let PeerMessage::Piece(piece_data) = received_msg else {
+                bail!("Expected type of message piece got {}", received_msg)
+            };
+
+            assert_eq!(u32::from_be_bytes(piece_data.index), piece_index);
+
+            trace!("piece downloaded");
+            save_block
+                .send(piece_data)
+                .await
+                .context("sending piece back")?;
+            trace!("piece sent");
+        }
+
+        Ok(self.remote_peer_id)
+    }
+
+    #[instrument(skip(self, piece_blocks))]
+    pub async fn receive_file_piece(
+        &mut self,
+        piece_num: usize,
+        piece_blocks: Vec<PieceBlock>,
+    ) -> Result<Vec<u8>> {
+        if self.chocked {
+            self.stream
+                .send_message(PeerMessage::Interested)
+                .await
+                .context("Send interested")?;
+
+            let received_msg = self.stream.next_message().await?;
+
+            let PeerMessage::Unchoke = received_msg else {
+                bail!("Expected type of message unchoke got {}", received_msg)
+            };
+        }
+
+        self.chocked = false;
+
+        let blocks_len = piece_blocks.len();
         let mut result = Vec::new();
 
-        for (i, block) in blocks.into_iter().enumerate() {
+        for (i, block) in piece_blocks.into_iter().enumerate() {
             trace!(
                 "Requesting piece {piece_num} via block num {}, number of blocks {}",
                 i,
                 blocks_len
             );
             self.stream
-                .send_message(PeerMessage::Request(block))
+                .send_message(PeerMessage::Request(block.into()))
                 .await
                 .context("request block {i}")?;
 
@@ -525,81 +588,6 @@ impl<'a> Peer<'a> {
 
         Ok(result)
     }
-}
-
-// NOTE: 16 KB Big endian
-const BLOCK_SIZE: u32 = 16 * 1024;
-impl TorrentInfo {
-    #[instrument(skip(self))]
-    fn calc_blocks(&self, piece_num: usize) -> Vec<RequestBlock> {
-        trace!(
-            "length: {}, piece_length: {}, number of pieces: {}",
-            self.length,
-            self.piece_length,
-            self.pieces.len()
-        );
-        let number_of_pieces = self.pieces.len();
-
-        let BlocksInfo {
-            block_count,
-            last_block_size,
-        } = calc_block_size(piece_num, self.length, self.piece_length, number_of_pieces);
-
-        (0..block_count)
-            .map(|index| {
-                let is_last_block = index == block_count - 1;
-                let begin = index as u32 * BLOCK_SIZE;
-                let block_size = if is_last_block {
-                    last_block_size
-                } else {
-                    BLOCK_SIZE
-                };
-                RequestBlock::new(piece_num as u32, begin, block_size)
-            })
-            .collect()
-    }
-}
-
-fn calc_block_size(
-    piece_num: usize,
-    length: usize,
-    piece_length: usize,
-    number_of_pieces: usize,
-) -> BlocksInfo {
-    let indexes_of_pieces = number_of_pieces - 1;
-    let full_pieces_count = number_of_pieces - 1;
-    let last_piece_size = if number_of_pieces == 1 {
-        piece_length
-    } else {
-        length - (full_pieces_count * piece_length)
-    };
-
-    let is_last_piece = piece_num == indexes_of_pieces;
-
-    let current_piece_length = if is_last_piece {
-        last_piece_size
-    } else {
-        piece_length
-    };
-
-    let block_count = (current_piece_length as f32 / BLOCK_SIZE as f32).ceil() as usize;
-
-    trace!("bloc count: {block_count}");
-
-    let full_blocks = block_count - 1;
-
-    let last_block_size: u32 = current_piece_length as u32 - BLOCK_SIZE * full_blocks as u32;
-    trace!("last block size {last_block_size}");
-
-    BlocksInfo {
-        block_count,
-        last_block_size,
-    }
-}
-
-struct BlocksInfo {
-    block_count: usize,
-    last_block_size: u32,
 }
 
 struct PeerTcpStream(Framed<TcpStream, PeerProtocolFramer>);
@@ -625,35 +613,5 @@ impl PeerTcpStream {
     async fn send_message(&mut self, message: PeerMessage) -> Result<()> {
         self.0.send(message).await.context("peer message send")?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::assert_eq;
-
-    use crate::torrent::peer::BLOCK_SIZE;
-
-    use super::{calc_block_size, BlocksInfo};
-
-    #[test]
-    fn test_block_calc() {
-        let piece_num = 0;
-        let length = 820892;
-        let piece_length = 262144;
-        let number_of_pieces = 4;
-
-        let BlocksInfo {
-            block_count,
-            last_block_size,
-        } = calc_block_size(piece_num, length, piece_length, number_of_pieces);
-
-        dbg!(block_count);
-        dbg!(last_block_size);
-
-        assert_eq!(
-            piece_length as u32,
-            (block_count as u32 - 1) * BLOCK_SIZE + last_block_size
-        );
     }
 }
