@@ -214,8 +214,13 @@ impl ReceivedBlock {
         .collect()
     }
 
+    #[allow(dead_code)]
     pub fn index(&self) -> u32 {
         u32::from_be_bytes(self.index)
+    }
+
+    pub fn begin(&self) -> u32 {
+        u32::from_be_bytes(self.begin)
     }
 
     pub fn data(&self) -> &[u8] {

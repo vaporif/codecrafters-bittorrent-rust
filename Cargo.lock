@@ -145,6 +145,7 @@ dependencies = [
  "bytes",
  "clap",
  "futures",
+ "futures-util",
  "hex",
  "rand",
  "regex",

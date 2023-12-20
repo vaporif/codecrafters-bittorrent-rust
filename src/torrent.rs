@@ -15,6 +15,7 @@ use std::{
 use crate::prelude::*;
 pub use file::*;
 
+use futures_util::stream::FuturesUnordered;
 pub use peer::*;
 mod piece;
 use futures::{Future, StreamExt};
@@ -105,15 +106,14 @@ impl Torrent {
     }
 
     #[instrument(skip(self, peers, saved_block, output))]
-    async fn cooperative_download_piece(
+    async fn cooperative_download_piece<T: Future<Output = Result<PeerId>>>(
         &self,
         piece_index: usize,
         piece_length: usize,
-        peers: impl Iterator<Item = impl Future<Output = Result<PeerId>>>,
+        peers: &mut FuturesUnordered<T>,
         saved_block: async_channel::Receiver<ReceivedBlock>,
         output: &PathBuf,
     ) -> Result<()> {
-        let mut peers = futures::stream::iter(peers);
         let average_piece_length = self.metadata.info.piece_length;
 
         // let mut clone = saved_block.clone();
@@ -134,7 +134,6 @@ impl Torrent {
                 trace!("peer future");
                 match peer_id {
                     Some(peer_id) => {
-                        let peer_id = peer_id.await;
                         trace!("peer response {:?}", peer_id);
                     },
                     None => {
@@ -146,9 +145,9 @@ impl Torrent {
                     trace!("saved_block channel message {:?}", block);
                     match block {
                         Ok(block) => {
-                            let index = block.index() as usize * self.metadata.info.piece_length;
+                            let begin = block.begin() as usize;
                             piece_blocks
-                                .get_mut(index..index + block.data().len())
+                                .get_mut(begin..begin + block.data().len())
                                 .context("getting slice to copy piece")?
                                 .copy_from_slice(block.data());
 
@@ -173,6 +172,8 @@ impl Torrent {
             .create(true)
             .open(output)
             .context("opening file")?;
+        file.set_len(self.metadata.info.length as u64)
+            .context("setting file size")?;
         file.seek(SeekFrom::Start((piece_index * average_piece_length) as u64))
             .context("seeking file")?;
         file.write_all(&piece_blocks).context("writing file")?;
@@ -224,23 +225,21 @@ impl Torrent {
             }
 
             trace!("blocks sent to process");
-            let filtered_peers = peers.iter_mut().filter_map(|peer| {
-                if piece.peer_has_piece(peer) {
-                    let request_block = request_block.clone();
-                    let requested_block = requested_block.clone();
-                    let saved_block = save_block.clone();
-                    Some(peer.process(request_block, requested_block, saved_block))
-                } else {
-                    None
-                }
-            });
+            let mut peers_interacting = FuturesUnordered::new();
+            for peer in peers.iter_mut().filter(|peer| piece.peer_has_piece(peer)) {
+                let request_block = request_block.clone();
+                let requested_block = requested_block.clone();
+                let saved_block = save_block.clone();
+
+                peers_interacting.push(peer.process(request_block, requested_block, saved_block));
+            }
 
             trace!("futures created");
 
             self.cooperative_download_piece(
                 piece.piece_index(),
                 total_piece_size,
-                filtered_peers,
+                &mut peers_interacting,
                 saved_block,
                 &output,
             )
