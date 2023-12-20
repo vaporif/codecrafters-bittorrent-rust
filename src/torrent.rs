@@ -157,18 +157,6 @@ impl Torrent {
             }
         }
 
-        // let mut file = OpenOptions::new()
-        //     .read(true)
-        //     .write(true)
-        //     .create(true)
-        //     .open(output)
-        //     .context("opening file")?;
-        // file.set_len(self.metadata.info.length as u64)
-        //     .context("setting file size")?;
-        // file.seek(SeekFrom::Start((piece_index * average_piece_length) as u64))
-        //     .context("seeking file")?;
-        // file.write_all(&piece_blocks).context("writing file")?;
-
         Ok(())
     }
 
@@ -210,6 +198,7 @@ impl Torrent {
 
         anyhow::ensure!(self.download_queue.borrow().len() == self.metadata.info.pieces.len());
 
+        // TODO: move queue to a download coordinator
         while let Some(piece) = self.download_queue.borrow_mut().pop() {
             let piece = piece.0;
             trace!("downloading piece {}", piece.piece_index());
