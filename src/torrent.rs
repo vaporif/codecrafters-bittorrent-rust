@@ -3,7 +3,6 @@ mod peer;
 mod tracker;
 
 use std::{
-    cell::RefCell,
     cmp::Reverse,
     collections::{BinaryHeap, HashMap, HashSet},
     fs::OpenOptions,
@@ -21,13 +20,14 @@ mod piece;
 use futures::{Future, StreamExt};
 pub use piece::*;
 use rand::{distributions::Alphanumeric, Rng};
+use tokio::sync::RwLock;
 pub use tracker::*;
 
 #[allow(unused)]
 #[derive(Debug)]
 pub struct Torrent {
     pub metadata: TorrentMetadataInfo,
-    download_queue: RefCell<BinaryHeap<Reverse<Piece>>>,
+    download_queue: RwLock<BinaryHeap<Reverse<Piece>>>,
     peer_id: PeerId,
     tracker: Tracker,
     port: u16,
@@ -49,7 +49,7 @@ impl Torrent {
             tracker: Tracker::new(&metadata.announce, port, peer_id),
             metadata,
             port,
-            download_queue: RefCell::new(BinaryHeap::new()),
+            download_queue: RwLock::new(BinaryHeap::new()),
         }
     }
 
@@ -192,14 +192,18 @@ impl Torrent {
         let mut peers = self.get_peers(self.max_peers).await?;
         let pieces = self.get_pieces(&peers);
 
-        for piece in pieces.into_iter().filter(|f| f.has_peers()) {
-            self.download_queue.borrow_mut().push(Reverse(piece));
+        {
+            let mut download_queue = self.download_queue.write().await;
+
+            for piece in pieces.into_iter().filter(|f| f.has_peers()) {
+                download_queue.push(Reverse(piece));
+            }
         }
 
-        anyhow::ensure!(self.download_queue.borrow().len() == self.metadata.info.pieces.len());
+        anyhow::ensure!(self.download_queue.read().await.len() == self.metadata.info.pieces.len());
 
         // TODO: move queue to a download coordinator
-        while let Some(piece) = self.download_queue.borrow_mut().pop() {
+        while let Some(piece) = self.download_queue.write().await.pop() {
             let piece = piece.0;
             trace!("downloading piece {}", piece.piece_index());
             let blocks = piece.piece_blocks(BLOCK_SIZE, &self.metadata.info);
