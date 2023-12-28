@@ -25,9 +25,9 @@ pub struct Handshake {
     pub peer_id: PeerId,
 }
 
-struct HandshakeCodec;
+struct HandshakeFramer;
 
-impl Encoder<Handshake> for HandshakeCodec {
+impl Encoder<Handshake> for HandshakeFramer {
     type Error = anyhow::Error;
 
     fn encode(
@@ -45,7 +45,7 @@ impl Encoder<Handshake> for HandshakeCodec {
     }
 }
 
-impl Decoder for HandshakeCodec {
+impl Decoder for HandshakeFramer {
     type Item = Handshake;
 
     type Error = anyhow::Error;
@@ -284,11 +284,11 @@ impl fmt::Display for PeerMessage {
     }
 }
 
-struct PeerProtocolCoder;
+struct PeerProtocolFramer;
 
 const PEER_MESSAGE_LENGTH: usize = 4;
 
-impl Decoder for PeerProtocolCoder {
+impl Decoder for PeerProtocolFramer {
     type Item = PeerMessage;
 
     type Error = anyhow::Error;
@@ -336,7 +336,7 @@ impl Decoder for PeerProtocolCoder {
         Ok(Some(message))
     }
 }
-impl Encoder<PeerMessage> for PeerProtocolCoder {
+impl Encoder<PeerMessage> for PeerProtocolFramer {
     type Error = anyhow::Error;
 
     #[instrument(skip(self))]
@@ -371,7 +371,7 @@ impl Encoder<PeerMessage> for PeerProtocolCoder {
 pub struct Peer<'a> {
     socket_addr: SocketAddrV4,
     remote_peer_id: PeerId,
-    stream: PeerTcpStream<PeerProtocolCoder>,
+    stream: PeerTcpStream<PeerProtocolFramer>,
     torrent_info_hash: Bytes20,
     torrent_info: &'a TorrentInfo,
     bitfield: bitvec::vec::BitVec<u8, Msb0>,
@@ -399,7 +399,7 @@ impl<'a> Peer<'a> {
             .context("establishing connection")?;
         let mut stream = PeerTcpStream::new(
             stream,
-            HandshakeCodec,
+            HandshakeFramer,
             Duration::from_secs(TIMOUT_DURATION_SECONDS as u64),
         );
         let handshake = Handshake {
@@ -413,7 +413,7 @@ impl<'a> Peer<'a> {
 
         let handshake = stream.next_message().await.context("getting handshake")?;
 
-        let mut stream = stream.change_codec(PeerProtocolCoder);
+        let mut stream = stream.change_codec(PeerProtocolFramer);
 
         let received_msg = stream.next_message().await?;
         let PeerMessage::Bitfield(bitfield_bytes) = received_msg else {
@@ -433,30 +433,32 @@ impl<'a> Peer<'a> {
         })
     }
 
-    pub async fn connect_with_handshake_only(
+    #[instrument]
+    pub async fn handshake(
         socket_addr: SocketAddrV4,
         peer_id: PeerId,
-        info_hash: Bytes20,
+        torrent_info_hash: Bytes20,
+        torrent_info: &'a TorrentInfo,
     ) -> Result<PeerId> {
         let stream = TcpStream::connect(socket_addr)
             .await
             .context("establishing connection")?;
         let mut stream = PeerTcpStream::new(
             stream,
-            HandshakeCodec,
+            HandshakeFramer,
             Duration::from_secs(TIMOUT_DURATION_SECONDS as u64),
         );
-
-        let handshake = Handshake { info_hash, peer_id };
+        let handshake = Handshake {
+            info_hash: torrent_info_hash,
+            peer_id,
+        };
         stream
             .send_message(handshake)
             .await
-            .context("Send handshake")?;
+            .context("sending handshake")?;
 
-        let handshake = stream
-            .next_message()
-            .await
-            .context("getting handshake back")?;
+        let handshake = stream.next_message().await.context("getting handshake")?;
+
         Ok(handshake.peer_id)
     }
 
