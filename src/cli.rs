@@ -18,6 +18,8 @@ pub struct Cli {
     pub port: u16,
     #[arg(short, long, default_value_t = DEFAULT_MAX_PEERS)]
     pub max_peers: u8,
+    #[arg(short, long)]
+    pub tokio_console: bool,
 }
 
 #[derive(Subcommand, Debug)]

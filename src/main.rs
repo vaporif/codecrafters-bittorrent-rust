@@ -4,6 +4,8 @@ use bencode::*;
 use clap::Parser;
 use cli::{pares_peer_arg, Cli, Command};
 
+use tracing_subscriber::{prelude::*, EnvFilter};
+
 use crate::{prelude::*, torrent::*};
 mod bencode;
 mod cli;
@@ -12,11 +14,25 @@ mod common;
 mod prelude;
 mod torrent;
 
+fn init_tracing(tokio_console: bool) {
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(EnvFilter::from_default_env());
+
+    if tokio_console {
+        subscriber.with(console_subscriber::spawn()).init();
+        trace!("tokio console enabled");
+    } else {
+        subscriber.init();
+    };
+}
+
 #[tokio::main()]
 #[allow(unused)]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
+    init_tracing(cli.tokio_console);
+
     match cli.command {
         Command::Decode { bencoded_value } => {
             let decoded: Value = from_str(bencoded_value)?;
